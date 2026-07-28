@@ -38,6 +38,13 @@ export const Audio = {
     document.addEventListener("visibilitychange", function(){
       if (!document.hidden) self.resume();
     });
+    /* 真的要離開時把音訊裝置還回去。不關的話瀏覽器會一直握著，
+       重載很多次之後有機會把輸出卡死 —— 那種狀況只能整個關掉瀏覽器才會好。
+       event.persisted 為真代表進了 bfcache，等一下可能會還原，那就不能關。 */
+    window.addEventListener("pagehide", function(e){
+      if (e.persisted) return;
+      try { if (self.ac && self.ac.state !== "closed") self.ac.close(); } catch (err) {}
+    });
   },
 
   resume(){

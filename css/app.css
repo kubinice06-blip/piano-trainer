@@ -1,0 +1,381 @@
+:root{
+  --ink:#0E2A33;
+  --ink-2:#153A46;
+  --ink-3:#1D4B59;
+  --paper:#F6F1E4;
+  --paper-2:#E9DFC7;
+  --paper-edge:#D8CCAF;
+  --brass:#C8912F;
+  --brass-dim:#8A6520;
+  --ember:#B4462F;
+  --bone:#DCD4C0;
+  --bone-dim:#8FA3AA;
+  --mono: "SF Mono", "JetBrains Mono", "IBM Plex Mono", "Roboto Mono", Consolas, "Courier New", monospace;
+  --han: "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Heiti TC", sans-serif;
+  --topbar: 58px;
+  --rail-w: 322px;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+}
+
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--ink);
+  color:var(--bone);
+  font-family:var(--han);
+  font-size:15px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+  /* 譜架上不需要選字，也不要雙擊放大或長按跳選單 */
+  -webkit-text-size-adjust:100%;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:manipulation;
+  overscroll-behavior-y:contain;
+}
+
+/* ---------- 頂欄：唯一該一直看得到的東西 ---------- */
+.topbar{
+  position:fixed;top:0;left:0;right:0;z-index:50;
+  height:calc(var(--topbar) + var(--safe-t));
+  padding:var(--safe-t) calc(12px + var(--safe-r)) 0 calc(12px + var(--safe-l));
+  display:flex;align-items:center;gap:12px;
+  background:linear-gradient(180deg,#D9A845 0%,var(--brass) 42%,#8F6A22 100%);
+  box-shadow:0 2px 0 rgba(0,0,0,.28), 0 6px 18px rgba(0,0,0,.3);
+}
+.tb-read{
+  font-family:var(--mono);font-size:19px;font-weight:700;color:#14262D;
+  letter-spacing:.03em;line-height:1;white-space:nowrap;
+}
+.tb-read small{font-size:9px;letter-spacing:.16em;display:block;font-weight:400;opacity:.72;margin-top:2px;}
+.tb-meta{
+  font-family:var(--mono);font-size:10.5px;color:rgba(20,38,45,.72);
+  letter-spacing:.1em;text-transform:uppercase;white-space:nowrap;
+}
+/* .btn-primary 帶著 width:100%（側欄用的），而且宣告在本檔後段，
+   同分時會勝出 —— 所以這裡要用 .topbar 前綴把它壓回來 */
+.topbar .tb-btn{min-height:40px;padding:9px 14px;flex:0 0 auto;width:auto;}
+
+/* 漢堡鈕：觸控目標 48px */
+.iconbtn{
+  appearance:none;border:1px solid rgba(20,38,45,.34);background:rgba(20,38,45,.10);
+  border-radius:3px;width:44px;height:40px;flex:0 0 auto;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+}
+.iconbtn:active{background:rgba(20,38,45,.22);}
+.iconbtn .bars,
+.iconbtn .bars::before,
+.iconbtn .bars::after{
+  display:block;width:18px;height:2px;background:#14262D;border-radius:2px;position:relative;
+}
+.iconbtn .bars::before{content:"";position:absolute;top:-6px;}
+.iconbtn .bars::after{content:"";position:absolute;top:6px;}
+body.drawer-open .iconbtn{background:#14262D;}
+body.drawer-open .iconbtn .bars{background:transparent;}
+body.drawer-open .iconbtn .bars::before{top:0;transform:rotate(45deg);background:var(--brass);}
+body.drawer-open .iconbtn .bars::after{top:0;transform:rotate(-45deg);background:var(--brass);}
+
+/* ---------- 設定抽屜 ---------- */
+.rail{
+  position:fixed;z-index:45;
+  top:calc(var(--topbar) + var(--safe-t));bottom:0;
+  left:0;width:var(--rail-w);
+  background:var(--ink-2);
+  border-right:1px solid rgba(200,145,47,.22);
+  padding:20px calc(18px) calc(40px + var(--safe-b)) calc(18px + var(--safe-l));
+  overflow-y:auto;-webkit-overflow-scrolling:touch;
+  transform:translateX(-100%);
+  transition:transform .22s ease;
+  will-change:transform;
+}
+body.drawer-open .rail{transform:none;}
+
+.scrim{
+  position:fixed;z-index:44;inset:calc(var(--topbar) + var(--safe-t)) 0 0 0;
+  background:rgba(6,18,22,.62);opacity:0;pointer-events:none;
+  transition:opacity .22s ease;
+}
+body.drawer-open .scrim{opacity:1;pointer-events:auto;}
+
+.desk{
+  padding:calc(var(--topbar) + var(--safe-t) + 16px) calc(16px + var(--safe-r))
+          calc(48px + var(--safe-b)) calc(16px + var(--safe-l));
+  min-width:0;
+  background:
+    radial-gradient(120% 80% at 50% -10%, rgba(200,145,47,.09), transparent 60%),
+    var(--ink);
+  min-height:100vh;
+}
+
+/* 有滑鼠的寬螢幕才把抽屜釘住。
+   iPad 橫向雖然也有 1180px，但它是譜架 —— 那 322px 要留給五線譜。 */
+@media (min-width:1180px) and (pointer:fine){
+  .rail{transform:none;}
+  .scrim{display:none;}
+  #menu{display:none;}
+  .desk{padding-left:calc(var(--rail-w) + 26px);padding-right:30px;}
+}
+
+.railhint{
+  margin-top:20px;padding-top:14px;border-top:1px solid rgba(220,212,192,.14);
+  font-size:11.5px;color:var(--bone-dim);line-height:2;
+}
+
+/* ---------- 標頭 ---------- */
+.brand{margin-bottom:26px;}
+.brand h1{
+  font-family:var(--mono);
+  font-size:15px;letter-spacing:.34em;text-transform:uppercase;
+  font-weight:700;color:var(--brass);margin:0 0 6px;
+}
+.brand p{margin:0;font-size:12.5px;color:var(--bone-dim);letter-spacing:.02em;}
+
+/* ---------- 模式切換 ---------- */
+.modes{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:24px;
+  border:1px solid rgba(220,212,192,.2);}
+.modes button{
+  appearance:none;background:transparent;border:0;color:var(--bone-dim);
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;
+  padding:11px 4px;cursor:pointer;transition:background .18s,color .18s;
+}
+.modes button + button{border-left:1px solid rgba(220,212,192,.2);}
+.modes button[aria-pressed="true"]{background:var(--brass);color:#12232A;font-weight:700;}
+.modes button:focus-visible{outline:2px solid var(--brass);outline-offset:-2px;}
+
+/* ---------- 設定欄 ---------- */
+fieldset{border:0;padding:0;margin:0 0 22px;}
+legend{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--brass);padding:0;margin-bottom:10px;
+  border-bottom:1px solid rgba(200,145,47,.25);width:100%;padding-bottom:6px;
+}
+.field{margin-bottom:11px;}
+.field label{display:block;font-size:12px;color:var(--bone-dim);margin-bottom:4px;letter-spacing:.03em;}
+select,input[type="number"]{
+  width:100%;background:var(--ink-3);color:var(--bone);
+  border:1px solid rgba(220,212,192,.22);border-radius:2px;
+  padding:7px 8px;font-family:var(--mono);font-size:12.5px;
+}
+select:focus,input:focus{outline:2px solid var(--brass);outline-offset:1px;}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+input[type="range"]{
+  width:100%;accent-color:var(--brass);background:transparent;
+  height:22px;cursor:pointer;
+}
+.check{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--bone);margin-bottom:8px;cursor:pointer;}
+.check input{accent-color:var(--brass);width:15px;height:15px;}
+
+/* ---------- 按鈕 ---------- */
+.btn{
+  appearance:none;cursor:pointer;
+  font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+  padding:11px 12px;border-radius:2px;transition:background .16s,color .16s,border-color .16s;
+}
+.btn-primary{background:var(--brass);color:#12232A;border:1px solid var(--brass);font-weight:700;width:100%;}
+.btn-primary:hover{background:#DBA33C;}
+.btn-ghost{background:transparent;color:var(--bone);border:1px solid rgba(220,212,192,.3);}
+.btn-ghost:hover{border-color:var(--brass);color:var(--brass);}
+.btn-ghost[aria-pressed="true"]{background:var(--ember);border-color:var(--ember);color:#F6F1E4;}
+.btn:focus-visible{outline:2px solid var(--brass);outline-offset:2px;}
+.btnrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:9px;margin-top:12px;}
+
+/* ---------- 譜面 ---------- */
+.sheetwrap{max-width:1180px;margin:0 auto;}
+
+/* 拍點條 —— 招牌元素 */
+.beatstrip{display:flex;gap:4px;flex:1 1 140px;min-width:90px;max-width:420px;height:24px;align-items:stretch;}
+.topbar .beatstrip{margin-right:auto;}
+.beatcell{
+  flex:1;background:rgba(20,38,45,.18);border:1px solid rgba(20,38,45,.34);
+  border-radius:1px;position:relative;overflow:hidden;
+}
+.beatcell.on{background:#14262D;}
+.beatcell.on.accent{background:var(--ember);}
+.beatcell::after{
+  content:attr(data-n);position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);font-size:10px;color:rgba(20,38,45,.55);
+}
+.beatcell.on::after{color:rgba(246,241,228,.85);}
+
+.paper{
+  background:var(--paper);
+  background-image:linear-gradient(180deg, rgba(216,204,175,.5) 0 1px, transparent 1px);
+  border-radius:0 0 3px 3px;
+  padding:26px 22px 30px;
+  box-shadow:0 18px 44px rgba(0,0,0,.42), 0 2px 0 var(--paper-edge);
+  color:#14262D;
+  min-height:300px;
+}
+.paper .head{
+  display:flex;justify-content:space-between;align-items:baseline;gap:16px;
+  border-bottom:1px solid var(--paper-edge);padding-bottom:10px;margin-bottom:16px;flex-wrap:wrap;
+}
+.paper .title{font-family:var(--mono);font-size:13px;letter-spacing:.2em;text-transform:uppercase;color:#14262D;font-weight:700;}
+.paper .sub{font-family:var(--mono);font-size:11.5px;color:#6B6551;letter-spacing:.08em;}
+/* ---------- 舞台：現在這一段 + 已經畫好的下一段 ---------- */
+.stage{display:flex;flex-direction:column;gap:10px;}
+.row{position:relative;order:2;}
+.row.is-now{order:1;}
+.row.is-next{order:2;opacity:.40;}
+.row.is-hidden{display:none;}
+.rowtag{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:#8B846C;margin-bottom:2px;height:12px;
+}
+.row.is-now .rowtag{color:#B4462F;}
+.row .score{width:100%;overflow-x:auto;}
+.row .score svg{max-width:100%;height:auto;display:block;}
+.row + .row{border-top:1px solid var(--paper-edge);padding-top:8px;}
+
+/* 進行中游標：跟著節拍器的硬體時鐘掃過當前小節 */
+.cursor{
+  position:absolute;pointer-events:none;z-index:2;
+  background:rgba(200,145,47,.18);
+  border-left:2px solid var(--ember);
+  border-radius:1px;
+}
+
+#score{width:100%;overflow-x:auto;}
+#score svg{max-width:100%;height:auto;display:block;}
+.chordsym{font-family:var(--mono);font-size:16px;font-weight:700;fill:#B4462F;letter-spacing:.01em;}
+.notename{font-family:var(--mono);font-size:10.5px;fill:#6B6551;text-anchor:middle;}
+.roman{font-family:var(--mono);font-size:11px;fill:#8A6520;letter-spacing:.06em;}
+.vf-hl path,.vf-hl rect,.vf-hl text{fill:#B4462F !important;stroke:#B4462F !important;}
+
+.answerbox{
+  margin-top:18px;border-top:1px solid var(--paper-edge);padding-top:14px;
+  font-family:var(--mono);font-size:13px;color:#33403F;line-height:2.1;
+}
+.answerbox b{color:#B4462F;font-weight:700;}
+.answerbox .dim{color:#8B846C;}
+
+/* ---------- 本次練習的段落存檔 ---------- */
+.review{margin-top:16px;border-top:1px solid rgba(200,145,47,.25);padding-top:12px;}
+.review-head{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--brass);margin-bottom:9px;
+}
+.review-head b{color:var(--bone);font-size:12px;}
+.review-back{padding:5px 12px;font-size:10.5px;letter-spacing:.1em;}
+.review-list{display:flex;flex-wrap:wrap;gap:6px;}
+.revchip{
+  appearance:none;cursor:pointer;text-align:left;
+  background:var(--ink-2);border:1px solid rgba(220,212,192,.22);border-radius:2px;
+  color:var(--bone-dim);font-family:var(--mono);font-size:11px;
+  padding:6px 9px;line-height:1.45;min-width:0;
+  transition:border-color .15s,color .15s,background .15s;
+}
+.revchip:hover{border-color:var(--brass);color:var(--bone);}
+.revchip[aria-pressed="true"]{background:var(--brass);border-color:var(--brass);color:#12232A;font-weight:700;}
+.revchip .n{color:var(--brass);margin-right:6px;}
+.revchip[aria-pressed="true"] .n{color:#12232A;}
+.revchip .k{color:var(--bone);}
+.revchip[aria-pressed="true"] .k{color:#12232A;}
+.revchip.is-live{border-color:var(--ember);}
+.revchip.is-live .n{color:var(--ember);}
+
+.reviewing .rowtag{color:var(--ember) !important;}
+.review-actions{display:flex;gap:6px;flex-wrap:wrap;}
+#markbad[aria-pressed="true"]{background:var(--ember);border-color:var(--ember);color:#F6F1E4;}
+
+/* ---------- 練習紀錄 ---------- */
+.stats{font-size:12px;color:var(--bone-dim);line-height:1.85;margin-bottom:12px;}
+.stats .big{
+  display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;
+  font-family:var(--mono);
+}
+.stats .big div{display:flex;flex-direction:column;}
+.stats .big b{color:var(--brass);font-size:19px;line-height:1.1;font-weight:700;}
+.stats .big span{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;opacity:.75;}
+.stats .line{border-top:1px solid rgba(220,212,192,.12);padding-top:7px;margin-top:2px;}
+.stats .tag{color:var(--ember);font-family:var(--mono);}
+.stats .ok{color:var(--brass);font-family:var(--mono);}
+.marked-head{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--brass);margin:10px 0 8px;display:flex;justify-content:space-between;
+  align-items:baseline;gap:8px;flex-wrap:wrap;
+}
+.marked-head b{color:var(--bone);font-size:12px;}
+.dimhint{color:var(--bone-dim);letter-spacing:.02em;text-transform:none;font-size:11px;}
+#marklist{max-height:240px;overflow-y:auto;}
+#marklist:empty::after{
+  content:"還沒有標記。練到覺得卡住的段落就按 X。";
+  display:block;font-size:11.5px;color:var(--bone-dim);font-family:var(--han);letter-spacing:0;
+}
+
+/* ---------- 拼頁列印的練習單 ---------- */
+.printsheet{background:#fff;color:#000;padding:14mm 10mm;}
+.printsheet h2{
+  font-family:var(--mono);font-size:13px;letter-spacing:.2em;text-transform:uppercase;
+  margin:0 0 2mm;color:#14262D;
+}
+.printsheet .meta{font-family:var(--mono);font-size:10px;color:#6B6551;margin-bottom:6mm;}
+.printsheet .item{margin-bottom:7mm;break-inside:avoid;page-break-inside:avoid;}
+.printsheet .item .cap{font-family:var(--mono);font-size:10.5px;color:#8A6520;margin-bottom:1mm;}
+.printsheet svg{max-width:100%;height:auto;display:block;}
+
+kbd{
+  font-family:var(--mono);font-size:11px;background:var(--ink-3);border:1px solid rgba(220,212,192,.28);
+  border-radius:2px;padding:1px 5px;color:var(--bone);
+}
+
+/* ---------- 練習配方 ---------- */
+details.recipe{margin-top:22px;border-top:1px solid rgba(200,145,47,.25);padding-top:14px;}
+details.recipe summary{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--brass);cursor:pointer;list-style:none;
+}
+details.recipe summary::-webkit-details-marker{display:none;}
+details.recipe summary::before{content:"▸ ";}
+details.recipe[open] summary::before{content:"▾ ";}
+details.recipe .body{font-size:12.5px;color:var(--bone-dim);margin-top:10px;}
+details.recipe table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;}
+details.recipe td{padding:4px 0;border-bottom:1px solid rgba(220,212,192,.12);vertical-align:top;}
+details.recipe td:first-child{font-family:var(--mono);color:var(--brass);white-space:nowrap;padding-right:10px;width:64px;}
+
+.err{background:var(--ember);color:#F6F1E4;padding:14px 16px;border-radius:2px;font-size:13px;margin-bottom:16px;}
+.err code{font-family:var(--mono);}
+
+/* ---------- 觸控裝置：目標放大到手指按得到 ---------- */
+@media (pointer:coarse){
+  select, input[type="number"]{min-height:44px;font-size:16px;}  /* 16px 以下 iOS 會自動放大頁面 */
+  .check{min-height:40px;}
+  .check input{width:20px;height:20px;}
+  .btn{min-height:44px;}
+  .modes button{padding:14px 4px;}
+  input[type="range"]{height:34px;}
+  .revchip{min-height:44px;}
+}
+
+/* iPad 直立：譜面留白收窄，讓五線譜盡量寬 */
+@media (max-width:900px){
+  .desk{padding-left:calc(10px + var(--safe-l));padding-right:calc(10px + var(--safe-r));}
+  .paper{padding:16px 10px 20px;}
+  .paper .head{gap:8px;}
+  .tb-bars, .tb-meta{display:none;}
+}
+@media (max-width:620px){
+  .tb-read{display:none;}
+}
+
+@media (prefers-reduced-motion: reduce){
+  *{transition:none !important;animation:none !important;}
+}
+@media print{
+  @page{margin:0;}
+  body{background:#fff;color:#000;}
+  .topbar,.rail,.scrim,.review,.railhint,.cursor{display:none !important;}
+  .desk{padding:0;background:#fff;min-height:0;}
+  .paper{box-shadow:none;background:#fff;border-radius:0;}
+  .row.is-next{opacity:1;}
+  .row.is-hidden{display:none;}
+
+  /* 列印練習單時，整頁只留拼好的那幾段 */
+  body.printing .desk{display:none !important;}
+  body.printing .printsheet{display:block !important;}
+}

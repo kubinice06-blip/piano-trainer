@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>樣張 — 全調性 · 語料庫和聲 · 雙手</title>
+<link rel="stylesheet" href="css/app.css">
+<style>
+  body{background:var(--ink);padding:24px;}
+  .wrap{max-width:1060px;margin:0 auto;}
+  h1{font-family:var(--mono);font-size:14px;letter-spacing:.3em;text-transform:uppercase;color:var(--brass);margin-bottom:4px;}
+  h2{font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;color:var(--bone-dim);
+     border-bottom:1px solid rgba(200,145,47,.25);padding-bottom:7px;margin:34px 0 16px;}
+  .lead{color:var(--bone-dim);font-size:13px;margin-bottom:8px;line-height:1.75;}
+  .card{margin-bottom:20px;}
+  .cap{font-family:var(--mono);font-size:12px;color:var(--brass);margin-bottom:6px;letter-spacing:.05em;}
+  .cap em{color:var(--bone-dim);font-style:normal;}
+  .paper{min-height:0;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>樣張</h1>
+  <p class="lead">
+    每一張都是舊版做不到的。羅馬數字標在小節上方。<br>
+    和聲進行取自 <b style="color:var(--brass)">When-in-Rome</b> 功能和聲語料庫的實際統計
+    —— 921 份分析、49,785 個和弦，含 Bach、Mozart、Schubert、Fanny Mendelssohn、Clara Schumann，
+    以及 Reger／Rimsky-Korsakov／Tchaikovsky／Kostka 的和聲學教科書習題。
+  </p>
+  <div id="out"></div>
+</div>
+
+<script type="module">
+import { loadVexFlow } from "./js/render/vexloader.js";
+import { drawExercise } from "./js/render/score.js";
+import { generateExercise } from "./js/gen/exercise.js";
+import { Key } from "./js/core/key.js";
+
+await loadVexFlow();
+const out = document.getElementById("out");
+
+function section(title, lead){
+  const h = document.createElement("h2"); h.textContent = title; out.appendChild(h);
+  if (lead){ const p = document.createElement("p"); p.className = "lead"; p.innerHTML = lead; out.appendChild(p); }
+}
+
+function show(cfg, note){
+  const ex = generateExercise(cfg);
+  const card = document.createElement("div");
+  card.className = "card";
+  const bits = [ex.key.displayName + "（" + ex.key.signatureLabel + "）", ex.roman.join(" │ ")];
+  if (ex.lhLabel) bits.push("左手：" + ex.lhLabel);
+  card.innerHTML = '<div class="cap">' + bits.join(" · ") + ' &nbsp;<em>' + (note || "") + "</em></div>" +
+                   '<div class="paper"><div class="score"></div></div>';
+  out.appendChild(card);
+  drawExercise(card.querySelector(".score"), ex, {showNames: false, showHarmony: true});
+}
+
+section("一、全 30 個調", "舊版只有 9 個大調、一個小調都沒有，而且查不到的調會靜默出錯音。");
+[["C", 4, ""],
+ ["F#", 5, "6♯"],
+ ["Cb", 4, "7♭ — F♭ / C♭ 的拼寫必須正確"],
+ ["Dm", 5, "小調"],
+ ["G#m", 5, "5♯ 小調：V 級導音升到 F𝄪（重升）"]
+].forEach(([id, lv, note], i) =>
+  show({level:lv, key:Key.fromId(id), ts:"4/4", hands:"both", bars:4, seed:20260728 + i*13}, note));
+
+section("二、語料庫和聲", "舊版只有 13 個寫死的四小節模板；現在是照語料庫的實際接續機率走，" +
+  "並用「可達性回推」保證一定收在選定的終止式上。難度 5 在 300 次出題中可產生 249 種不同進行。");
+[11, 97, 233, 451, 877].forEach(seed =>
+  show({level:5, key:Key.fromId("C"), ts:"4/4", hands:"both", bars:4, seed}));
+
+section("三、小調的實際和聲", "V 與 vii° 自動升導音，而且旋律會避開 ♭6→♯7 的增二度（改用旋律小調的寫法）。");
+[[5,"a 小調"],[61,""],[199,""]].forEach(([seed]) =>
+  show({level:5, key:Key.fromId("Am"), ts:"4/4", hands:"both", bars:4, seed}));
+
+section("四、左手不再只有一種寫法", "舊版左手只有三種寫死的樣子。現在是有模式庫的獨立聲部，難度愈高手部獨立要求愈高。");
+[["sustain","4/4"],["rootFifth","4/4"],["block","4/4"],["arpeggio","4/4"],
+ ["alberti","4/4"],["waltz","3/4"],["parallel","4/4"],["contrary","4/4"]
+].forEach(([p, ts], i) =>
+  show({level:6, key:Key.fromId("G"), ts, hands:"both", bars:4, lhPattern:p, seed:404 + i*29}));
+
+section("五、角色互換：左手旋律、右手和弦", "練手部獨立最有效的方式，舊版完全沒有。");
+[71, 173].forEach(seed => show({level:5, key:Key.fromId("F"), ts:"4/4", hands:"swap", bars:4, seed}));
+
+/* ---------- 和弦 ---------- */
+const { generateChordDrill, PROGRESSIONS } = await import("./js/gen/chordprog.js");
+const { drawChordDrill } = await import("./js/render/score.js");
+
+function showChord(cfg, note){
+  const d = generateChordDrill(Object.assign({order:"single", fixed:"C", count:1, ts:"4/4", seed:11}, cfg));
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = '<div class="cap">' + d.label + " · " + d.systems[0].tonic.shortName +
+                   ' &nbsp;<em>' + (note || "") + "</em></div>" +
+                   '<div class="paper"><div class="score"></div></div>';
+  out.appendChild(card);
+  drawChordDrill(card.querySelector(".score"), d, {revealed:true, showNoteNames:false});
+}
+
+section("六、和弦：29 種和弦、28 條進行", "舊版是 6 種和弦、5 條進行，而且每個和弦都是一小節一顆全音符、右手完全沒事做。");
+showChord({prog:"ii_V_I_2", style:"rootlessA", comp:"whole"}, "每小節兩個和弦，延伸音 m9 / 13 / 7♭9");
+showChord({prog:"tritone", style:"drop2", comp:"whole"}, "三全音代理 + Drop 2");
+showChord({prog:"sec_chain", style:"shell", comp:"whole"}, "副屬連鎖，收在 7alt");
+showChord({prog:"so_what", style:"quartal", comp:"whole"}, "四度堆疊 —— So What 那個聲響");
+
+section("七、Comping 節奏：不再是一小節一顆全音符");
+showChord({prog:"ii_V_I", style:"rootlessA", comp:"charleston"}, "Charleston");
+showChord({prog:"ii_V_I", style:"rootlessA", comp:"offbeat"}, "反拍切分");
+showChord({prog:"ii_V_I", style:"rootlessA", comp:"push"}, "搶拍進入");
+
+section("八、和弦模式也是雙手練習", "上部結構：左手 shell、右手一個好按的三和弦，合起來是完整的變化屬和弦。" +
+  "走路低音：左手每拍一音，第四拍半音接近下一個和弦的根音。");
+showChord({prog:"turn_fast", style:"upper", comp:"whole"}, "上部結構（雙手）");
+showChord({prog:"blues_jazz", style:"shell", comp:"walking"}, "走路低音 + 右手 voicing");
+showChord({prog:"coltrane", style:"rootShell", comp:"walking"}, "Coltrane Changes + 走路低音");
+</script>
+</body>
+</html>

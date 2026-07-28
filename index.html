@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>譜台 — 視譜與爵士和弦練習器</title>
+<meta name="theme-color" content="#0E2A33">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="譜台">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- ============ 頂欄：譜架上唯一該一直看得到的東西 ============ -->
+<header class="topbar">
+  <button class="iconbtn" id="menu" aria-label="設定" aria-expanded="false">
+    <span class="bars"></span>
+  </button>
+
+  <div class="tb-read"><span id="bpmread">60</span><small>BPM</small></div>
+  <div class="beatstrip" id="beatstrip"></div>
+  <div class="tb-read tb-bars"><span id="barcount">0</span><small>小節</small></div>
+  <div class="tb-meta" id="clipmeta">停止</div>
+
+  <button class="btn btn-ghost tb-btn" id="metro" aria-pressed="false">開始</button>
+  <button class="btn btn-primary tb-btn" id="gen">換一題</button>
+</header>
+
+<div class="scrim" id="scrim"></div>
+
+<!-- ============ 設定抽屜 ============ -->
+<aside class="rail" id="rail">
+  <div class="brand">
+    <h1>譜台</h1>
+    <p>視譜 · 爵士和弦 · 隨機出題</p>
+  </div>
+
+  <div class="modes" role="group" aria-label="練習模式">
+    <button id="mode-read" aria-pressed="true">視譜</button>
+    <button id="mode-chord" aria-pressed="false">和弦</button>
+  </div>
+
+  <div id="panel-read">
+    <fieldset>
+      <legend>出題</legend>
+      <div class="field">
+        <label for="lv">難度</label>
+        <select id="lv"></select>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="hands">練習手</label>
+          <select id="hands"></select>
+        </div>
+        <div class="field">
+          <label for="ts">拍號</label>
+          <select id="ts">
+            <option value="4/4">4/4</option>
+            <option value="3/4">3/4</option>
+            <option value="2/4">2/4</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="lhpat">左手寫法</label>
+        <select id="lhpat"></select>
+      </div>
+      <div class="field">
+        <label for="keysel">調性</label>
+        <select id="keysel"></select>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="bars">小節數</label>
+          <select id="bars">
+            <option>2</option><option selected>4</option><option>8</option><option>12</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="flow">練習流程</label>
+          <select id="flow">
+            <option value="flow" selected>連續流 · 預讀</option>
+            <option value="auto">段落結束換題</option>
+            <option value="manual">手動換題</option>
+          </select>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="shownames"> 譜下標音名</label>
+      <label class="check"><input type="checkbox" id="showharm"> 標出和聲級數</label>
+    </fieldset>
+  </div>
+
+  <div id="panel-chord" hidden>
+    <fieldset>
+      <legend>進行</legend>
+      <div class="field">
+        <label for="prog">曲式</label>
+        <select id="prog"></select>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="korder">調的順序</label>
+          <select id="korder">
+            <option value="cycle">五度循環</option>
+            <option value="random">隨機</option>
+            <option value="single">單一調</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="kfixed">起始調</label>
+          <select id="kfixed"></select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="ncyc">一次出幾個調</label>
+        <select id="ncyc">
+          <option>1</option><option selected>2</option><option>4</option><option>6</option><option>12</option>
+        </select>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Voicing 與節奏</legend>
+      <div class="field">
+        <label for="voi">排列法</label>
+        <select id="voi"></select>
+      </div>
+      <div class="field">
+        <label for="comp">Comping 節奏</label>
+        <select id="comp"></select>
+      </div>
+      <div class="field">
+        <label for="swing">Swing <span id="swingread">平均八分</span></label>
+        <input type="range" id="swing" min="50" max="70" step="2" value="50">
+      </div>
+      <label class="check"><input type="checkbox" id="revealed"> 直接顯示音符（不藏答案）</label>
+      <label class="check"><input type="checkbox" id="shownotes" checked> 譜下列出音名</label>
+    </fieldset>
+  </div>
+
+  <fieldset>
+    <legend>節拍器</legend>
+    <div class="field">
+      <label for="bpm">速度 BPM</label>
+      <input type="number" id="bpm" min="30" max="220" step="1" value="60" inputmode="numeric">
+    </div>
+    <div class="field">
+      <label for="vol">節拍器音量 <span id="volread">80</span></label>
+      <input type="range" id="vol" min="0" max="100" step="5" value="80">
+    </div>
+    <label class="check"><input type="checkbox" id="mute"> 靜音（拍點條與游標照常）</label>
+    <label class="check"><input type="checkbox" id="countin" checked> 先數一小節預備拍</label>
+    <label class="check"><input type="checkbox" id="keepawake" checked> 練習時螢幕保持常亮</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>譜面</legend>
+    <div class="field">
+      <label for="zoom">大小 <span id="zoomread">100%</span></label>
+      <input type="range" id="zoom" min="80" max="200" step="10" value="100">
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>練習紀錄</legend>
+    <div class="stats" id="stats"></div>
+    <div class="marked-head">
+      複習清單 <b id="markcount">0</b> 段
+      <span class="dimhint">練習中按 <kbd>X</kbd> 標記</span>
+    </div>
+    <div class="review-list" id="marklist"></div>
+    <div class="btnrow">
+      <button class="btn btn-ghost" id="printsheet">列印練習單</button>
+      <button class="btn btn-ghost" id="clearlib">清除紀錄</button>
+    </div>
+  </fieldset>
+
+  <button class="btn btn-ghost" id="play" style="width:100%">播放解答音</button>
+  <div class="btnrow">
+    <button class="btn btn-ghost" id="reveal">看答案</button>
+    <button class="btn btn-ghost" id="print">列印這一段</button>
+  </div>
+
+  <details class="recipe">
+    <summary>每日一小時配方</summary>
+    <div class="body">
+      <table>
+        <tr><td>12 分</td><td>音階琶音：C G D A F B♭ 大調 + a e d 和聲小調，雙手兩個八度，重點在過拇指</td></tr>
+        <tr><td>6 分</td><td>哈農 1–2 首，♩=60 每拍兩音，只盯沒在彈的手指有沒有跟著動</td></tr>
+        <tr><td>12 分</td><td>巴哈小步舞曲，分手練，把左手當旋律唱</td></tr>
+        <tr><td>15 分</td><td>主曲目，只練難的那四小節，不要從頭彈到尾</td></tr>
+        <tr><td>8 分</td><td><b style="color:var(--brass)">視譜</b>：比程度低兩級的新譜，慢速、不停、不回頭</td></tr>
+        <tr><td>7 分</td><td><b style="color:var(--brass)">爵士</b>：ii–V–I 五度循環，左手 shell，♩=60</td></tr>
+      </table>
+    </div>
+  </details>
+
+  <p class="railhint">
+    <kbd>N</kbd> 換題 · <kbd>P</kbd> 播放 · <kbd>S</kbd> 看答案 · <kbd>M</kbd> 節拍器 ·
+    <kbd>R</kbd> 重來同一題 · <kbd>↑</kbd><kbd>↓</kbd> 調速度<br>
+    觸控：左滑換下一題 · 右滑開存檔 · 點譜面播放
+  </p>
+</aside>
+
+<!-- ============ 譜面 ============ -->
+<main class="desk" id="desk">
+  <div class="sheetwrap">
+    <div id="errbox"></div>
+
+    <div class="paper">
+      <div class="head">
+        <div class="title" id="sheetTitle">視譜練習</div>
+        <div class="sub" id="sheetSub">—</div>
+      </div>
+      <div class="stage" id="stage">
+        <div class="row" id="rowA">
+          <div class="rowtag"></div>
+          <div class="score"></div>
+          <div class="cursor" hidden></div>
+        </div>
+        <div class="row" id="rowB">
+          <div class="rowtag"></div>
+          <div class="score"></div>
+          <div class="cursor" hidden></div>
+        </div>
+      </div>
+      <div class="answerbox" id="answer" hidden></div>
+    </div>
+
+    <div class="review" id="review" hidden>
+      <div class="review-head">
+        <span>本次練習存檔 <b id="revcount">0</b> 段</span>
+        <span class="review-actions">
+          <button class="btn btn-ghost review-back" id="markbad">✗ 這段沒彈好</button>
+          <button class="btn btn-ghost review-back" id="revback" hidden>回到練習</button>
+        </span>
+      </div>
+      <div class="review-list" id="revlist"></div>
+    </div>
+  </div>
+</main>
+
+<!-- 拼頁列印用；平常不顯示，只有列印練習單時才排進頁面 -->
+<div class="printsheet" id="sheetout" hidden></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

@@ -19,11 +19,20 @@ export const COMP_PATTERNS = {
   anticipate: {label:"前一拍先進",       pat:[["h",0],["q",1],["8",1],["8",0]]}
 };
 
+/* 分解和弦不是節奏型，是把 voicing 拆開來一個一個彈，所以另外列。 */
+export const ARPEGGIOS = {
+  arp_up:     {label:"分解和弦（上行）",   dir:"up"},
+  arp_down:   {label:"分解和弦（下行）",   dir:"down"},
+  arp_updown: {label:"分解和弦（上下行）", dir:"updown"}
+};
+
 export function compPatterns(ts){
   // 這些型都是為 4/4 寫的；其他拍號只給最單純的兩種
-  if (ts !== "4/4") return ["whole", "half"];
-  return Object.keys(COMP_PATTERNS);
+  const base = (ts !== "4/4") ? ["whole", "half"] : Object.keys(COMP_PATTERNS);
+  return base.concat(Object.keys(ARPEGGIOS));
 }
+
+export function isArpeggio(name){ return !!ARPEGGIOS[name]; }
 
 (function validate(){
   const bad = [];
@@ -62,6 +71,62 @@ export function compBar(v, patternName, ts, beats){
   });
 
   return hasRh ? {top, bottom} : {top, bottom: null};
+}
+
+/* ---------- 分解和弦 ---------- */
+
+/* 把 voicing 的音排成一條夠長的上行序列（不夠就往上疊八度）。
+   分解的是實際會按的那個 voicing，不是課本上的原位和弦 ——
+   練的才是手真的要做的動作。 */
+function ascendingRun(notes, need){
+  const out = [];
+  let oct = 0;
+  while (out.length < need){
+    for (const n of notes){
+      out.push(N(n.l, n.a, n.o + oct));
+      if (out.length >= need) break;
+    }
+    oct++;
+    if (oct > 4) break;
+  }
+  return out;
+}
+
+function arpSequence(notes, count, dir){
+  if (!notes.length) return [];
+  if (dir === "down"){
+    const asc = ascendingRun(notes, count);
+    return asc.slice().reverse();
+  }
+  if (dir === "updown"){
+    const upN = Math.ceil((count + 1) / 2);
+    const up = ascendingRun(notes, upN);
+    const down = up.slice(0, -1).reverse();          // 折返時不重複最高音
+    const seq = up.concat(down);
+    while (seq.length < count) seq.push(seq[seq.length - 1 - (seq.length % 2 ? 1 : 0)] || seq[0]);
+    return seq.slice(0, count);
+  }
+  return ascendingRun(notes, count);
+}
+
+/**
+ * 一小節的分解和弦。八分音符逐音彈；
+ * 兩手 voicing 時左手分解、右手持和弦，就是實際伴奏的樣子。
+ */
+export function arpeggioBar(v, dirName, beats){
+  const dir = (ARPEGGIOS[dirName] || ARPEGGIOS.arp_up).dir;
+  const count = Math.round(beats * 2);               // 每拍兩個八分
+  const hasRh = !!(v.rh && v.rh.length);
+  const seq = arpSequence(v.lh, count, dir);
+
+  const bottom = seq.map(n => ({rest:false, note:n, dur:"8", clef:"bass"}));
+  if (!hasRh) return {top: bottom, bottom: null};
+
+  const hold = beats === 4 ? "w" : beats === 3 ? "hd" : beats === 2 ? "h" : "q";
+  return {
+    top: [{rest:false, chordNotes:v.rh, note:v.rh[0], dur:hold, clef:"treble"}],
+    bottom
+  };
 }
 
 /* ---------- 走路低音 ---------- */

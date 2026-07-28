@@ -94,11 +94,17 @@ export const Audio = {
   /* 0.5 = 平均八分；0.62 左右是典型的 swing。只影響後半拍的起點。 */
   swing: 0.5,
 
-  play(plan, bpm, onNote, onDone){
+  /**
+   * @param startAt 可選：AudioContext 絕對時間。給了就把第 0 拍排在那個時刻 ——
+   *                跟節拍器同步播放時必須用這個，不能靠 setTimeout 湊。
+   */
+  play(plan, bpm, onNote, onDone, startAt){
     var ac = this.ctx();
     if (!ac || !plan || !plan.events.length) return false;
     this.stop();
-    var self = this, spb = 60 / bpm, t0 = ac.currentTime + 0.15;
+    var self = this, spb = 60 / bpm;
+    var t0 = (startAt !== undefined && startAt !== null) ? startAt : ac.currentTime + 0.15;
+    if (t0 < ac.currentTime + 0.02) t0 = ac.currentTime + 0.02;   // 已經過去的時間排不了
     var sw = this.swing;
 
     plan.events.forEach(function(ev){

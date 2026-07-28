@@ -108,5 +108,15 @@ export const Metro = {
     return elapsed - this._countInTotal;
   },
 
-  get barsDone(){ return Math.max(0, this._bars - 1); }
+  get barsDone(){ return Math.max(0, this._bars - 1); },
+
+  /* 第 n 個正式拍（0 起算，不含預備拍）的 AudioContext 絕對時間。
+     要讓解答音跟節拍器對齊，就得排在同一個硬體時鐘上 ——
+     用 setTimeout 去湊會漂，而且是聽得出來的那種漂。 */
+  timeOfBeat(n){
+    if (!this.ac) return 0;
+    var spb = 60 / this.bpm;
+    // _nextTime 是「還沒排定的下一拍」的時間，序號是 _beat
+    return this._nextTime + (n + this._countInTotal - this._beat) * spb;
+  }
 };

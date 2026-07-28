@@ -6,7 +6,7 @@ import { Audio } from "./audio/sound.js";
 import { Metro } from "./audio/metro.js";
 import { LEVELS, KEY_POOLS, HAND_MODES, availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
 import { PROGRESSIONS, generateChordDrill, progressionCategories,
-         VOICINGS, COMP_PATTERNS, compPatterns } from "./gen/chordprog.js";
+         VOICINGS, compPatterns, compLabel } from "./gen/chordprog.js";
 import { MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, cycleOfFourths } from "./core/key.js";
 import { Stream } from "./stream.js";
 import { Library } from "./library.js";
@@ -29,7 +29,8 @@ const state = {
   cursorRaf: null,
   reviewIdx: -1,       // -1 = 正在練習；>=0 = 正在調閱第幾段存檔
   libId: null,         // 目前這一段在長期紀錄裡的 id
-  practiceStart: 0     // 這一輪節拍器開始的時間，用來累計練習時數
+  practiceStart: 0,    // 這一輪節拍器開始的時間，用來累計練習時數
+  playAlongCycle: 0    // 和弦模式跟播到第幾輪
 };
 
 /* ---------- 選單填充 ---------- */
@@ -139,7 +140,7 @@ function refreshComping(){
   sel.innerHTML = "";
   compPatterns("4/4").forEach(id => {
     const o = document.createElement("option");
-    o.value = id; o.textContent = COMP_PATTERNS[id].label;
+    o.value = id; o.textContent = compLabel(id);
     sel.appendChild(o);
   });
   const w = document.createElement("option");
@@ -269,11 +270,12 @@ function renderChord(){
     zoom: parseInt($("zoom").value, 10) / 100
   });
   state.plans[0] = state.plan;
+  state.layouts[0] = state.plan.layout;      // 游標要靠這個定位，忘了存就會卡在原點
   $("sheetTitle").textContent = "爵士和弦練習";
   $("sheetSub").textContent = [
     d.label,
     VOICINGS[d.cfg.style] ? VOICINGS[d.cfg.style].label : d.cfg.style,
-    d.cfg.comp === "walking" ? "走路低音" : (COMP_PATTERNS[d.cfg.comp] || {}).label,
+    compLabel(d.cfg.comp),
     d.grand ? "雙手" : "左手",
     d.systems.map(s => s.tonic.shortName).join(" → "),
     "#" + d.seed.toString(36)
@@ -478,17 +480,28 @@ function updateCursor(posOverride){
   const row = state.rows[state.nowRow];
   if (!row) return;
   const el = row.querySelector(".cursor");
-  const ex = state.stream && state.stream.current();
   const live = (posOverride !== undefined) || Metro.on;
-
-  if (!live || state.mode !== "read" || !ex){ el.hidden = true; return; }
+  if (!live){ el.hidden = true; return; }
 
   const pos = (posOverride !== undefined) ? posOverride : Metro.position();
   if (pos < 0){ el.hidden = true; return; }        // 預備拍期間不顯示
 
-  const bar = state.stream.barInSegment(pos, ex.beats);
   const layout = state.layouts[state.nowRow];
-  if (!layout || bar < 0 || bar >= layout.length){ el.hidden = true; return; }
+  if (!layout || !layout.length){ el.hidden = true; return; }
+
+  let bar;
+  if (state.mode === "read"){
+    const ex = state.stream && state.stream.current();
+    if (!ex){ el.hidden = true; return; }
+    bar = state.stream.barInSegment(pos, ex.beats);
+  } else {
+    // 和弦模式沒有換段，就在整條進行上循環 —— 練 changes 本來就是一直繞
+    const d = state.drill;
+    if (!d){ el.hidden = true; return; }
+    const n = Math.floor(pos / d.beats);
+    bar = ((n % layout.length) + layout.length) % layout.length;
+  }
+  if (bar < 0 || bar >= layout.length){ el.hidden = true; return; }
 
   const L = layout[bar];
   const svg = row.querySelector(".score svg");
@@ -622,6 +635,33 @@ function setPlayLabel(on){
   $("play").setAttribute("aria-pressed", on ? "true" : "false");
 }
 
+/* ---------- 跟著節拍器同步播放解答音 ---------- */
+
+/* 排在節拍器的同一個硬體時鐘上，所以第一顆音就對得準；
+   用 setTimeout 去湊會漂，而且是聽得出來的那種漂。 */
+function startPlayAlong(){
+  if (!$("playalong").checked || !Metro.on || !state.plan.events.length) return;
+  let startBeat;
+  if (state.mode === "read"){
+    startBeat = state.stream.segStartBar * (state.stream.current().beats || 4);
+  } else {
+    const bars = (state.plans[0] && state.plans[0].layout.length) || 1;
+    startBeat = state.playAlongCycle * bars * (state.drill ? state.drill.beats : 4);
+  }
+  const ok = Audio.play(state.plan, currentBpm(), highlight, onPlayAlongEnd,
+                        Metro.timeOfBeat(startBeat));
+  if (ok) setPlayLabel(true);
+}
+
+function onPlayAlongEnd(){
+  setPlayLabel(false);
+  // 和弦模式沒有換段，播完就接下一輪，跟循環的游標一致
+  if ($("playalong").checked && Metro.on && state.mode === "chord"){
+    state.playAlongCycle++;
+    startPlayAlong();
+  }
+}
+
 function togglePlay(){
   if (Audio.playing){
     Audio.stop(); highlight(null); setPlayLabel(false);
@@ -664,6 +704,7 @@ Metro.onBar = (barsDone) => {
   if (barsDone - state.stream.segStartBar >= cur.cfg.bars){
     Audio.stop(); highlight(null); setPlayLabel(false);
     advanceSegment(barsDone);
+    startPlayAlong();          // 新的一段接著播，中間不斷
   }
 };
 
@@ -672,6 +713,7 @@ function toggleMetro(){
     Metro.stop();
     stopCursor();
     Wake.release();
+    Audio.stop(); highlight(null); setPlayLabel(false);
     if (state.practiceStart){
       Library.addSeconds((Date.now() - state.practiceStart) / 1000);
       state.practiceStart = 0;
@@ -685,10 +727,11 @@ function toggleMetro(){
     return;
   }
   const cur = state.mode === "read" && state.stream ? state.stream.current() : null;
-  const beats = cur ? cur.beats : 4;
+  const beats = cur ? cur.beats : (state.drill ? state.drill.beats : 4);
   buildBeatStrip(beats);
   $("barcount").textContent = "0";
   if (state.stream) state.stream.segStartBar = 0;
+  state.playAlongCycle = 0;
   if (!Metro.start(currentBpm(), beats, $("countin").checked ? 1 : 0)){
     $("clipmeta").textContent = "此瀏覽器不支援音訊";
     return;
@@ -699,6 +742,7 @@ function toggleMetro(){
   $("clipmeta").textContent = "預備";
   Wake.request();
   state.practiceStart = Date.now();
+  startPlayAlong();
 }
 
 /* ---------- iPad：抽屜、手勢、螢幕常亮、音訊解鎖 ---------- */

@@ -9,7 +9,8 @@ import { iv, noteName, dIdx, parseVexKey } from "../core/pitch.js";
 import { Key, cycleOfFourths } from "../core/key.js";
 import { chordLabel } from "../core/chords.js";
 import { voice, shellForm, VOICINGS } from "./voicing.js";
-import { compBar, walkingBass, compPatterns, COMP_PATTERNS } from "./comping.js";
+import { compBar, walkingBass, compPatterns, COMP_PATTERNS,
+         ARPEGGIOS, isArpeggio, arpeggioBar } from "./comping.js";
 import { tsInfo } from "./rhythm.js";
 
 /* 一格 = [距主音音程, 和弦類型]。一個小節放一格或兩格。 */
@@ -118,7 +119,14 @@ export function progressionCategories(){
   return out;
 }
 
-export { VOICINGS, COMP_PATTERNS, compPatterns };
+export { VOICINGS, COMP_PATTERNS, ARPEGGIOS, compPatterns, isArpeggio };
+
+/* 給 UI 顯示用的 comping 名稱 */
+export function compLabel(id){
+  if (id === "walking") return "走路低音";
+  if (ARPEGGIOS[id]) return ARPEGGIOS[id].label;
+  return (COMP_PATTERNS[id] || {}).label || id;
+}
 
 /* 把一條進行套到某個調上，展開成每小節的和弦格 */
 export function realize(progId, tonicKey){
@@ -191,6 +199,10 @@ export function generateChordDrill(cfg){
           for (let k = 0; k < take; k++){
             bottom.push(wb[k] || {rest:false, note:v.lh[0], dur:"q", clef:"bass"});
           }
+        } else if (isArpeggio(cfg.comp)){
+          const cell = arpeggioBar(v, cfg.comp, beats / perBar);
+          cell.top.forEach(x => top.push(x));
+          if (cell.bottom) cell.bottom.forEach(x => bottom.push(x));
         } else {
           const cell = compBar(v, perBar === 1 ? (cfg.comp || "whole") : "half", perBar === 1 ? ts : "x", beats / perBar);
           cell.top.forEach(x => top.push(x));

@@ -7,7 +7,7 @@
  *     VexFlow 有 0.95 MB，而且幾乎不會變，沒必要每次都上網要。
  */
 
-const VERSION = "putai-v1";
+const VERSION = "putai-v2";
 const ASSETS = [
   "./",
   "./index.html",
@@ -45,8 +45,9 @@ const ASSETS = [
 self.addEventListener("install", (e) => {
   e.waitUntil(
     caches.open(VERSION)
-      // 個別抓，單一檔案失敗不會讓整包安裝失敗
-      .then(c => Promise.all(ASSETS.map(u => c.add(u).catch(() => {}))))
+      // 個別抓，單一檔案失敗不會讓整包安裝失敗；一律跟伺服器要最新的
+      .then(c => Promise.all(ASSETS.map(u =>
+        fetch(u, {cache:"no-cache"}).then(r => r.ok ? c.put(u, r) : null).catch(() => {}))))
       .then(() => self.skipWaiting())
   );
 });
@@ -82,9 +83,14 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  // 程式碼：網路優先，離線時退回快取；連首頁都拿不到就給快取的 index
+  // 程式碼：網路優先，離線時退回快取；連首頁都拿不到就給快取的 index。
+  //
+  // cache:"no-cache" 是必要的，不是保險。GitHub Pages 送 Cache-Control: max-age=600，
+  // 普通的 fetch() 會先撞上瀏覽器自己的 HTTP 快取直接回舊檔，
+  // 「網路優先」就變成空話 —— 推了新版，iPad 十分鐘內還是開到舊的。
+  // no-cache 會強制帶 If-None-Match 回伺服器問，沒變就收 304，很便宜。
   e.respondWith(
-    fetch(req)
+    fetch(req, {cache: "no-cache"})
       .then(r => put(req, r))
       .catch(() => caches.match(req, {ignoreSearch:true})
         .then(hit => hit || caches.match("./index.html")))

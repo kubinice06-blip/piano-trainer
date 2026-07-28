@@ -369,6 +369,18 @@ function renderAudioStatus(){
   if (iOS && st === "running" && !muted){
     lines.push("沒聲音的話先撥一下 iPad 側邊的實體靜音鍵，再按上面的測試音");
   }
+  // 離線與安裝狀態：iOS 上只有 Safari 能真的裝成主畫面 App，
+  // 其他瀏覽器不註冊 Service Worker，離線就是不會有 —— 這件事要講出來。
+  const swOn = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
+  const standalone = window.matchMedia("(display-mode: standalone)").matches ||
+                     window.navigator.standalone === true;
+  if (iOS && !swOn){
+    lines.push('離線快取<b>未啟用</b>：iOS 上只有 <b>Safari</b> 能裝成主畫面 App。' +
+               '要離線可用，請改用 Safari 開這個網址再「加入主畫面」');
+  } else if (swOn){
+    lines.push("離線快取<b>已啟用</b>" + (standalone ? "（主畫面 App）" : ""));
+  }
+
   el.className = "audiostat " + cls;
   el.innerHTML = lines.join("<br>");
 

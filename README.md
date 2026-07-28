@@ -7,7 +7,8 @@
 
 ## 在 iPad 上使用
 
-1. iPad Safari 開啟上面那個網址
+1. **用 Safari** 開啟上面那個網址（iOS 上只有 Safari 能裝成主畫面 App、
+   也只有它會註冊 Service Worker；Chrome for iOS 沒有離線快取）
 2. 分享鈕 → **加入主畫面**
 
 之後就是一個全螢幕 App，沒有網路也能開（Service Worker 會把整包快取起來，

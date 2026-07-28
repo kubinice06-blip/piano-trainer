@@ -177,6 +177,7 @@ function drawOpts(){
   return {
     showNames: $("shownames").checked,
     showHarmony: $("showharm").checked,
+    showChords: $("showchords").checked,
     zoom: parseInt($("zoom").value, 10) / 100
   };
 }
@@ -584,9 +585,9 @@ function generate(opts){
 function updateRevealButton(){
   const btn = $("reveal");
   if (state.mode === "read"){
-    const on = $("shownames").checked;
+    const on = $("showchords").checked;
     btn.setAttribute("aria-pressed", on ? "true" : "false");
-    btn.textContent = on ? "藏音名" : "看音名";
+    btn.textContent = on ? "藏和弦代號" : "看和弦代號";
   } else {
     btn.setAttribute("aria-pressed", state.revealed ? "true" : "false");
     btn.textContent = state.revealed ? "藏答案" : "看答案";
@@ -595,8 +596,8 @@ function updateRevealButton(){
 
 function toggleReveal(){
   if (state.mode === "read"){
-    $("shownames").checked = !$("shownames").checked;
-    renderRead();
+    $("showchords").checked = !$("showchords").checked;
+    redraw();
   } else {
     state.revealed = !state.revealed;
     $("revealed").checked = state.revealed;
@@ -799,8 +800,8 @@ function bind(){
   ["keysel", "bars", "lhpat"].forEach(id =>
     $(id).addEventListener("change", () => generate({fresh:true})));
   $("flow").addEventListener("change", () => { generate({fresh:true}); });
-  ["shownames", "showharm"].forEach(id =>
-    $(id).addEventListener("change", redraw));
+  ["shownames", "showharm", "showchords"].forEach(id =>
+    $(id).addEventListener("change", () => { redraw(); updateRevealButton(); }));
 
   $("prog").addEventListener("change", () => { refreshChordKeys(); generate(); });
   ["korder", "kfixed", "ncyc", "voi", "comp"].forEach(id =>

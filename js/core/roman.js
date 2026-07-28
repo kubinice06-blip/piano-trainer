@@ -2,7 +2,7 @@
    代號與 tools/build-harmony-stats.mjs 產出的統計表同一套，
    所以語料庫學到的接續可以直接拿來用。 */
 
-import { N, iv, stack, dIdx } from "./pitch.js";
+import { N, iv, stack, dIdx, noteName } from "./pitch.js";
 
 const ROMAN_IDX = {I:0, II:1, III:2, IV:3, V:4, VI:5, VII:6};
 const IDX_ROMAN = ["I","II","III","IV","V","VI","VII"];
@@ -126,8 +126,13 @@ export function realizeChord(key, c){
     }
   }
 
+  // 屬功能的大三和弦帶七音時是屬七（G7），不是大七（Gmaj7）
+  const symbol = (c.quality === "maj" && c.seventh && dominantFn)
+    ? chordSymbol(root, "maj", false, notes[0]).replace(/^([^/]*)/, "$1" + "7")
+    : chordSymbol(root, c.quality, c.seventh, notes[0]);
+
   return {
-    root, notes, bass: notes[0], members,
+    root, notes, bass: notes[0], members, symbol,
     degree: c.degree, applied: c.applied, token: c.token,
     quality: c.quality, seventh: c.seventh, inv: c.inv,
     /* 導音：屬功能和弦的三音，必須上行解決到主音 */
@@ -138,6 +143,22 @@ export function realizeChord(key, c){
     /* 這個和弦用到的音級與其變化量，給旋律與左手套用 */
     alterations: chordAlterations(key, notes)
   };
+}
+
+/* 羅馬數字是「這個和弦在調裡的功能」，和弦代號是「這個和弦本身叫什麼」。
+   視譜時看代號比較實用 —— 你按下去的是 G7，不是 V7。
+   轉位寫成斜線和弦，因為那正是低音實際在彈的音。 */
+function chordSymbol(root, quality, seventh, bass){
+  let sfx;
+  if (quality === "min")          sfx = seventh ? "m7" : "m";
+  else if (quality === "dim")     sfx = seventh ? "°7" : "°";
+  else if (quality === "halfdim") sfx = seventh ? "m7♭5" : "°";
+  else if (quality === "aug")     sfx = seventh ? "+7" : "+";
+  else                            sfx = seventh ? "maj7" : "";   // maj，屬和弦在下面改掉
+
+  let s = noteName(root) + sfx;
+  if (bass && bass.l !== root.l) s += "/" + noteName(bass);
+  return s;
 }
 
 /* 和弦裡有哪些音偏離了調號 —— 旋律碰到同音級時要跟著變 */

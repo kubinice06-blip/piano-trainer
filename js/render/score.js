@@ -140,10 +140,15 @@ export function drawExercise(el, ex, opts){
   var vexSig = ex.key.vexSignature;
   var sigCount = ex.key.accidentalCount;
 
+  // 和弦代號要畫在譜表上方，所以整體往下讓出位置
+  var topPad = o.showChords ? 40 : 24;
+  var H2 = lines * lineH + 60 + (o.showChords ? 16 : 0);
+  if (H2 !== H){ H = H2; renderer.resize(px, H * zoom); if (zoom !== 1) ctx.scale(zoom, zoom); }
+
   for (var li = 0; li < lines; li++){
     var from = li * perLine, to = Math.min(from + perLine, ex.measures.length);
     var count = to - from;
-    var y = 24 + li * lineH;
+    var y = topPad + li * lineH;
     var head = 62 + sigCount * 11 + (li === 0 ? 26 : 0);
     var mw = (W - 20 - head) / count;
 
@@ -208,6 +213,19 @@ export function drawExercise(el, ex, opts){
 
       if (o.showHarmony && svg && ex.roman){
         try { svgText(svg, st.getNoteStartX(), st.getY() - 6, "roman", ex.roman[mi]); } catch (e) {}
+      }
+
+      // 和弦代號：一小節兩個和弦時各自畫在自己那一拍上
+      if (o.showChords && svg && ex.harmony && ex.harmony.bars[mi]){
+        var slots = ex.harmony.bars[mi].slots;
+        var inner = w - (st.getNoteStartX() - st.getX()) - 12;
+        for (var si = 0; si < slots.length; si++){
+          if (!slots[si].chord) continue;
+          try {
+            svgText(svg, st.getNoteStartX() + (slots[si].beat / ex.beats) * inner,
+                    st.getY() - (o.showHarmony ? 22 : 8), "chordsym", slots[si].chord.symbol);
+          } catch (e) {}
+        }
       }
 
       drawBeams(ctx, topNotes, ex.ts);

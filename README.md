@@ -3,11 +3,12 @@
 隨機出題的鋼琴練習器。全 30 個調、雙手、四小節連續流預讀、和聲取自真實語料庫統計。
 純前端，沒有建置步驟，離線可用。
 
+**https://kubinice06-blip.github.io/piano-trainer/**
+
 ## 在 iPad 上使用
 
-1. 把整個資料夾推到 GitHub，在 repo 的 **Settings → Pages** 把來源設成該分支的根目錄
-2. iPad Safari 開啟該網址
-3. 分享鈕 → **加入主畫面**
+1. iPad Safari 開啟上面那個網址
+2. 分享鈕 → **加入主畫面**
 
 之後就是一個全螢幕 App，沒有網路也能開（Service Worker 會把整包快取起來，
 含 `vendor/vexflow.js`，所以連 CDN 全掛都不影響）。

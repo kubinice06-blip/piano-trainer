@@ -56,13 +56,15 @@ export const Audio = {
     this.master.connect(this.ac.destination);
   },
 
-  /* iOS 的 WebAudio 預設走鈴聲通道 —— 側邊的實體靜音鍵一撥就整個沒聲。
-     Safari 16.4+ 可以用 audioSession 宣告成播放用途，這是唯一有支援的做法。
-　　 舊版本沒有替代方案：這裡曾經放過一個「循環播放無聲 <audio>」的偏方，
-     但那段 WAV 的資料只有 7 個取樣（約 0.44 毫秒）卻設成無限循環，
-     而且我從沒驗證過它真的有效 —— 沒有證據支持、卻有卡住 iOS 音訊工作階段的風險，
-     所以移除。舊版 Safari 就老實提示使用者去看實體靜音鍵。 */
+  /* iOS 的 WebAudio 預設走鈴聲通道，實體靜音鍵一撥就沒聲。
+     Safari 16.4+ 的 navigator.audioSession 可以宣告成播放用途來繞過。
+     但那個宣告會改變整個音訊路由，我沒有 iOS 裝置可以驗證，
+     實際上也出現過「其他網站有聲、這個 App 完全沒聲」的回報 ——
+     所以預設不碰，改成使用者自己開。預設能出聲比繞過靜音鍵重要得多。 */
+  overrideSilentSwitch: false,
+
   _takePlaybackChannel(){
+    if (!this.overrideSilentSwitch){ this.playbackChannel = "default"; return; }
     try {
       if (navigator.audioSession){
         navigator.audioSession.type = "playback";
@@ -73,9 +75,69 @@ export const Audio = {
     this.playbackChannel = "none";
   },
 
-  /* iOS 的實體靜音鍵有沒有辦法被繞過。UI 拿來決定要不要提醒使用者。 */
+  /* 讓使用者現場切換，不用重開 App */
+  setSilentSwitchOverride(on){
+    this.overrideSilentSwitch = !!on;
+    if (!this.ac) return;
+    try {
+      if (navigator.audioSession){
+        navigator.audioSession.type = on ? "playback" : "auto";
+        this.playbackChannel = on ? "audioSession" : "default";
+      }
+    } catch (e) {}
+    this.resume();
+  },
+
+  /* 測試音：一秒的明顯嗶聲，同時量測真正送到輸出的振幅。
+     「有沒有聲音」不該只能靠耳朵回報，程式自己要量得出來。 */
+  testTone(){
+    var ac = this.ctx();
+    if (!ac) return Promise.resolve({ok:false, reason:"這個瀏覽器不支援 Web Audio"});
+    var self = this;
+    var tap = ac.createAnalyser();
+    tap.fftSize = 2048;
+    var buf = new Float32Array(tap.fftSize);
+
+    var g = ac.createGain();
+    var o = ac.createOscillator();
+    o.type = "triangle";
+    o.frequency.value = 660;
+    var t = ac.currentTime + 0.05;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.5, t + 0.02);
+    g.gain.setValueAtTime(0.5, t + 0.85);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+    o.connect(g);
+    g.connect(ac.destination);
+    g.connect(tap);
+    o.start(t); o.stop(t + 1.05);
+
+    return new Promise(function(resolve){
+      var peak = 0, n = 0;
+      var iv = setInterval(function(){
+        tap.getFloatTimeDomainData(buf);
+        for (var i = 0; i < buf.length; i++){
+          var v = Math.abs(buf[i]);
+          if (v > peak) peak = v;
+        }
+        if (++n > 55){
+          clearInterval(iv);
+          resolve({
+            ok: peak > 0.01,
+            peak: peak,
+            state: self.ac.state,
+            channel: self.playbackChannel,
+            sampleRate: self.ac.sampleRate,
+            outputs: (self.ac.destination && self.ac.destination.maxChannelCount) || null
+          });
+        }
+      }, 20);
+    });
+  },
+
+  /* 這個瀏覽器有沒有能力繞過實體靜音鍵（不管目前有沒有開） */
   get canOverrideSilentSwitch(){
-    return this.playbackChannel === "audioSession";
+    try { return !!navigator.audioSession; } catch (e) { return false; }
   },
 
   /* 一個音：三個泛音 + 低通衰減，模擬鋼琴被敲擊後的亮度下降 */

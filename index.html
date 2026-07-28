@@ -158,6 +158,8 @@
     <label class="check"><input type="checkbox" id="countin" checked> 先數一小節預備拍</label>
     <label class="check"><input type="checkbox" id="playalong"> 開始時同步播放解答音</label>
     <label class="check"><input type="checkbox" id="keepawake" checked> 練習時螢幕保持常亮</label>
+    <label class="check"><input type="checkbox" id="bypasssilent"> 繞過 iPad 實體靜音鍵（沒聲音時別開）</label>
+    <button class="btn btn-ghost" id="testtone" style="width:100%">🔊 測試音</button>
     <div class="audiostat" id="audiostat"></div>
   </fieldset>
 
@@ -214,6 +216,7 @@
 <main class="desk" id="desk">
   <div class="sheetwrap">
     <div id="errbox"></div>
+    <div class="audiobanner" id="audiobanner" hidden></div>
 
     <div class="paper">
       <div class="head">

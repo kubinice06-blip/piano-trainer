@@ -283,6 +283,22 @@ input[type="range"]{
 .review-actions{display:flex;gap:6px;flex-wrap:wrap;}
 #markbad[aria-pressed="true"]{background:var(--ember);border-color:var(--ember);color:#F6F1E4;}
 
+/* 音訊出問題時直接壓在譜面上方 —— 藏在設定裡的診斷等於沒有 */
+.audiobanner{
+  position:relative;
+  background:var(--ember);color:#F6F1E4;
+  padding:12px 40px 12px 14px;border-radius:2px;margin-bottom:14px;
+  font-size:13px;line-height:1.6;
+}
+.audiobanner b{font-family:var(--mono);}
+.ab-x{
+  position:absolute;top:6px;right:6px;
+  width:30px;height:30px;line-height:1;
+  background:transparent;border:0;color:#F6F1E4;
+  font-size:20px;cursor:pointer;border-radius:2px;
+}
+.ab-x:hover{background:rgba(0,0,0,.18);}
+
 /* 音訊狀態：沒聲音的時候至少要看得出來是哪一環出問題 */
 .audiostat{
   margin-top:10px;padding:8px 10px;border-radius:2px;

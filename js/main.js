@@ -348,6 +348,7 @@ function renderAudioStatus(){
   const el = $("audiostat");
   if (!el) return;
   const st = Audio.state;
+  const banner = $("audiobanner");
   const muted = Metro.muted || Metro.volume <= 0;
   const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
               (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
@@ -365,12 +366,25 @@ function renderAudioStatus(){
     cls = "warn";
     lines.push("節拍器目前是<b>靜音</b>（音量 " + Math.round(Metro.volume * 100) + "）");
   }
-  if (iOS && st === "running" && !Audio.canOverrideSilentSwitch){
-    cls = cls === "warn" ? "warn" : "ok";
-    lines.push("這個 iOS 版本無法繞過實體靜音鍵 —— 沒聲音請先撥一下 iPad 側邊的靜音開關");
+  if (iOS && st === "running" && !muted){
+    lines.push("沒聲音的話先撥一下 iPad 側邊的實體靜音鍵，再按上面的測試音");
   }
   el.className = "audiostat " + cls;
   el.innerHTML = lines.join("<br>");
+
+  /* 有問題就壓在譜面正上方。診斷訊息藏在設定面板裡等於沒有 ——
+     使用者根本不會為了找原因去翻選項。 */
+  if (!banner) return;
+  if (cls === "warn"){
+    banner.className = "audiobanner";
+    banner.innerHTML = "🔇 " + lines.join(" · ") +
+      '<button class="ab-x" id="abx" aria-label="關閉">×</button>';
+    banner.hidden = false;
+    const x = $("abx");
+    if (x) x.addEventListener("click", () => { banner.hidden = true; });
+  } else {
+    banner.hidden = true;
+  }
 }
 
 /* 把目前這一段記進長期紀錄。只在「換了一段新的」時候呼叫，
@@ -910,6 +924,36 @@ function bind(){
   $("mute").addEventListener("change", function(){
     Metro.muted = this.checked;
     renderAudioStatus();
+  });
+
+  $("bypasssilent").addEventListener("change", function(){
+    Audio.setSilentSwitchOverride(this.checked);
+    renderAudioStatus();
+  });
+
+  /* 測試音：把「有沒有聲音」變成量得出來的事，不用靠猜。 */
+  $("testtone").addEventListener("click", async () => {
+    const btn = $("testtone");
+    btn.disabled = true;
+    btn.textContent = "🔊 播放中…";
+    const r = await Audio.testTone();
+    btn.disabled = false;
+    btn.textContent = "🔊 測試音";
+    const el = $("audiostat");
+    if (r.ok){
+      el.className = "audiostat ok";
+      el.innerHTML = "測試音已送出，量到的振幅 <b>" + r.peak.toFixed(3) + "</b>" +
+        "（狀態 " + r.state + "、" + r.sampleRate + " Hz、路由 " + r.channel + "）<br>" +
+        "<b>有聽到嗶聲嗎？</b><br>" +
+        "聽到 → 音訊正常，問題在別處。<br>" +
+        "沒聽到 → 訊號有出去但沒到喇叭：檢查 iPad 側邊實體靜音鍵、" +
+        "音量鍵、藍牙輸出，或把上面「繞過實體靜音鍵」切換一次再試。";
+      $("audiobanner").hidden = true;
+    } else {
+      el.className = "audiostat warn";
+      el.innerHTML = "測試音<b>沒有產生訊號</b>（" + (r.reason || ("狀態 " + r.state)) +
+                     "）—— 這是程式端的問題，請告訴我這一行。";
+    }
   });
 
   $("revback").addEventListener("click", exitReview);

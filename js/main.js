@@ -339,7 +339,39 @@ function exitReview(){
   syncMarkButton();
 }
 
-/* ---------- 長期練習紀錄 ---------- */
+/* ---------- 音訊狀態 ---------- */
+
+/* 「沒聲音」最難查的地方在於畫面上完全沒有線索。
+   這裡把音訊引擎的實際狀態攤開來，至少能一眼分辨是
+   還沒解鎖、被系統打斷、被自己靜音、還是要去看 iPad 的實體靜音鍵。 */
+function renderAudioStatus(){
+  const el = $("audiostat");
+  if (!el) return;
+  const st = Audio.state;
+  const muted = Metro.muted || Metro.volume <= 0;
+  const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+  let cls = "ok", lines = [];
+  if (st === "未建立"){
+    lines.push("音訊尚未啟用 —— 點畫面任一處或按開始即可");
+  } else if (st !== "running"){
+    cls = "warn";
+    lines.push("音訊被系統暫停（<b>" + st + "</b>）—— 點一下畫面通常就會回來");
+  } else {
+    lines.push("音訊引擎 <b>正常</b>");
+  }
+  if (muted){
+    cls = "warn";
+    lines.push("節拍器目前是<b>靜音</b>（音量 " + Math.round(Metro.volume * 100) + "）");
+  }
+  if (iOS && st === "running" && !Audio.canOverrideSilentSwitch){
+    cls = cls === "warn" ? "warn" : "ok";
+    lines.push("這個 iOS 版本無法繞過實體靜音鍵 —— 沒聲音請先撥一下 iPad 側邊的靜音開關");
+  }
+  el.className = "audiostat " + cls;
+  el.innerHTML = lines.join("<br>");
+}
 
 /* 把目前這一段記進長期紀錄。只在「換了一段新的」時候呼叫，
    重畫（縮放、開關抽屜）不算又練了一次。 */
@@ -743,6 +775,7 @@ function toggleMetro(){
   Wake.request();
   state.practiceStart = Date.now();
   startPlayAlong();
+  renderAudioStatus();
 }
 
 /* ---------- iPad：抽屜、手勢、螢幕常亮、音訊解鎖 ---------- */
@@ -761,9 +794,11 @@ function toggleDrawer(){ setDrawer(!document.body.classList.contains("drawer-ope
 function installAudioUnlock(){
   const once = () => {
     Audio.ctx();
+    renderAudioStatus();
     window.removeEventListener("pointerdown", once);
     window.removeEventListener("keydown", once);
   };
+  Audio.onStateChange = renderAudioStatus;
   window.addEventListener("pointerdown", once, {passive:true});
   window.addEventListener("keydown", once);
 }
@@ -870,8 +905,12 @@ function bind(){
     $("volread").textContent = String(v);
     Metro.volume = v / 100;
     if (v > 0 && $("mute").checked){ $("mute").checked = false; Metro.muted = false; }
+    renderAudioStatus();
   });
-  $("mute").addEventListener("change", function(){ Metro.muted = this.checked; });
+  $("mute").addEventListener("change", function(){
+    Metro.muted = this.checked;
+    renderAudioStatus();
+  });
 
   $("revback").addEventListener("click", exitReview);
   $("markbad").addEventListener("click", toggleMark);
@@ -947,6 +986,7 @@ async function boot(){
   installGestures();
   registerServiceWorker();
   renderLibrary();
+  renderAudioStatus();
 
   try {
     await loadVexFlow();

@@ -283,6 +283,18 @@ input[type="range"]{
 .review-actions{display:flex;gap:6px;flex-wrap:wrap;}
 #markbad[aria-pressed="true"]{background:var(--ember);border-color:var(--ember);color:#F6F1E4;}
 
+/* 音訊狀態：沒聲音的時候至少要看得出來是哪一環出問題 */
+.audiostat{
+  margin-top:10px;padding:8px 10px;border-radius:2px;
+  font-size:11.5px;line-height:1.7;
+  background:rgba(20,38,45,.35);border:1px solid rgba(220,212,192,.14);
+  color:var(--bone-dim);
+}
+.audiostat b{font-family:var(--mono);}
+.audiostat.ok b{color:var(--brass);}
+.audiostat.warn{border-color:var(--ember);background:rgba(180,70,47,.16);color:#E9C9C0;}
+.audiostat.warn b{color:#FFB3A0;}
+
 /* ---------- 練習紀錄 ---------- */
 .stats{font-size:12px;color:var(--bone-dim);line-height:1.85;margin-bottom:12px;}
 .stats .big{

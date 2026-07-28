@@ -18,10 +18,37 @@ export const Audio = {
       this.ac = new AC();
       this._newMaster();
       this._takePlaybackChannel();
+      this._watchState();
     }
-    if (this.ac.state === "suspended") this.ac.resume();
+    if (this.ac.state !== "running") this.resume();
     return this.ac;
   },
+
+  /* iOS 會在來電、切換 App、鎖屏時把 AudioContext 打斷，而且不會自己回來。
+     這裡盯著狀態，一有機會就重新啟動 —— 否則使用者看到的就是「突然沒聲音」，
+     而且畫面上沒有任何線索。 */
+  _watchState(){
+    var self = this;
+    try {
+      this.ac.addEventListener("statechange", function(){
+        if (self.ac.state !== "running") self.resume();
+        if (self.onStateChange) self.onStateChange(self.ac.state);
+      });
+    } catch (e) {}
+    document.addEventListener("visibilitychange", function(){
+      if (!document.hidden) self.resume();
+    });
+  },
+
+  resume(){
+    if (!this.ac) return;
+    try {
+      var p = this.ac.resume();
+      if (p && p.catch) p.catch(function(){});
+    } catch (e) {}
+  },
+
+  get state(){ return this.ac ? this.ac.state : "未建立"; },
 
   _newMaster(){
     this.master = this.ac.createGain();
@@ -29,10 +56,12 @@ export const Audio = {
     this.master.connect(this.ac.destination);
   },
 
-  /* iOS 的 WebAudio 預設走鈴聲通道 —— 側邊的實體靜音鍵一撥，
-     節拍器就整個沒聲音，而且畫面上完全看不出原因。
-     Safari 16.4+ 可以用 audioSession 宣告成播放用途；不支援的舊版本
-     退回播一段無聲的 <audio> 迴圈，藉此把音訊路由搶到播放通道。 */
+  /* iOS 的 WebAudio 預設走鈴聲通道 —— 側邊的實體靜音鍵一撥就整個沒聲。
+     Safari 16.4+ 可以用 audioSession 宣告成播放用途，這是唯一有支援的做法。
+　　 舊版本沒有替代方案：這裡曾經放過一個「循環播放無聲 <audio>」的偏方，
+     但那段 WAV 的資料只有 7 個取樣（約 0.44 毫秒）卻設成無限循環，
+     而且我從沒驗證過它真的有效 —— 沒有證據支持、卻有卡住 iOS 音訊工作階段的風險，
+     所以移除。舊版 Safari 就老實提示使用者去看實體靜音鍵。 */
   _takePlaybackChannel(){
     try {
       if (navigator.audioSession){
@@ -41,19 +70,7 @@ export const Audio = {
         return;
       }
     } catch (e) {}
-    try {
-      var el = document.createElement("audio");
-      el.loop = true;
-      el.setAttribute("playsinline", "");
-      // 0.05 秒的無聲 WAV
-      el.src = "data:audio/wav;base64,UklGRjIAAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQ4AAAAAAAAAAAAAAAAAAAAAAA==";
-      var p = el.play();
-      if (p && p.catch) p.catch(function(){});
-      this._silentLoop = el;
-      this.playbackChannel = "silentLoop";
-    } catch (e) {
-      this.playbackChannel = "none";
-    }
+    this.playbackChannel = "none";
   },
 
   /* iOS 的實體靜音鍵有沒有辦法被繞過。UI 拿來決定要不要提醒使用者。 */

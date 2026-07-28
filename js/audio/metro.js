@@ -1,13 +1,21 @@
 /* 節拍器。
-   聲音排在 AudioContext 的硬體時鐘上（準），視覺回呼改用 requestAnimationFrame
-   輪詢已排定的拍點（不會被 setTimeout 節流拖走）—— 這是 iPad 上不漂拍的前提。 */
+ *
+ * 聲音排在 AudioContext 的硬體時鐘上，所以拍點本身永遠是準的。
+ * 但「什麼時候去排下一批拍點」不能靠 requestAnimationFrame ——
+ * 分頁切到背景、螢幕變暗、iPad 切去別的 App，rAF 會被瀏覽器完全停掉，
+ * 於是再也沒有新的拍點被排出去，節拍器就這樣安靜地死掉。
+ * 這裡改用 setInterval 當排程驅動：背景時它會被節流到大約每秒一次，
+ * 所以看不見的時候把預排長度拉長到 1.5 秒，讓它撐得過去。
+ * 視覺的平順交給 main.js 自己的 rAF，那邊停掉只是畫面不動，不會沒聲音。
+ */
 
 import { Audio } from "./sound.js";
 
 export const Metro = {
   ac: null,
   on: false,
-  raf: null,
+  timer: null,
+  _onVisible: null,
   bpm: 60,
   beatsPerBar: 4,
   countInBars: 0,
@@ -56,16 +64,22 @@ export const Metro = {
     this._countIn = this._countInTotal;
     this._nextTime = this.ac.currentTime + 0.12;
     this.on = true;
-    this._loop();
+    var self = this;
+    this.timer = setInterval(function(){ self._schedule(); }, 25);
+    this._onVisible = function(){ if (!document.hidden) self._schedule(); };
+    document.addEventListener("visibilitychange", this._onVisible);
+    this._schedule();
     return true;
   },
 
-  /* 往前排 0.2 秒的拍點，並把已經響過的拍點回報給 UI */
-  _loop(){
-    if (!this.on) return;
+  /* 往前排一批拍點，並把已經響過的回報給 UI。
+     看不見的時候 setInterval 會被節流到大約 1 秒一次，所以預排要拉長。 */
+  _schedule(){
+    if (!this.on || !this.ac) return;
     var now = this.ac.currentTime;
+    var lookahead = (typeof document !== "undefined" && document.hidden) ? 1.5 : 0.30;
 
-    while (this._nextTime < now + 0.20){
+    while (this._nextTime < now + lookahead){
       var idx = this._beat % this.beatsPerBar;
       var counting = this._countIn > 0;
       this._click(this._nextTime, idx === 0);
@@ -87,15 +101,16 @@ export const Metro = {
         if (this._bars > 1 && this.onBar) this.onBar(this._bars - 1);
       }
     }
-
-    var self = this;
-    this.raf = requestAnimationFrame(function(){ self._loop(); });
   },
 
   stop(){
     this.on = false;
-    if (this.raf) cancelAnimationFrame(this.raf);
-    this.raf = null;
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    if (this._onVisible){
+      document.removeEventListener("visibilitychange", this._onVisible);
+      this._onVisible = null;
+    }
     this._scheduled = [];
   },
 

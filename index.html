@@ -52,6 +52,10 @@
         <label for="lv">難度</label>
         <select id="lv"></select>
       </div>
+      <div class="field">
+        <label for="dens">音符長短</label>
+        <select id="dens"></select>
+      </div>
       <div class="row2">
         <div class="field">
           <label for="hands">練習手</label>
@@ -66,8 +70,9 @@
           </select>
         </div>
       </div>
+      <button class="btn btn-ghost" id="swaphands" style="width:100%;margin-bottom:11px">⇄ 左右手交換練同一段</button>
       <div class="field">
-        <label for="lhpat">左手寫法</label>
+        <label for="lhpat">伴奏寫法（沒拿旋律的那隻手）</label>
         <select id="lhpat"></select>
       </div>
       <div class="field">
@@ -147,12 +152,23 @@
   <fieldset>
     <legend>節拍器</legend>
     <div class="field">
-      <label for="bpm">速度 BPM</label>
-      <input type="number" id="bpm" min="30" max="220" step="1" value="60" inputmode="numeric">
+      <label for="tempo">速度 <span id="temporead">60</span> BPM</label>
+      <input type="range" id="tempo" min="30" max="220" step="1" value="60">
     </div>
-    <div class="field">
-      <label for="vol">節拍器音量 <span id="volread">80</span></label>
-      <input type="range" id="vol" min="0" max="100" step="5" value="80">
+    <div class="row2">
+      <div class="field">
+        <label for="bpm">直接輸入</label>
+        <input type="number" id="bpm" min="30" max="220" step="1" value="60" inputmode="numeric">
+      </div>
+      <div class="field">
+        <label for="vol">節拍器音量</label>
+        <select id="vol">
+          <option value="25">很輕</option>
+          <option value="50">輕</option>
+          <option value="80" selected>標準</option>
+          <option value="100">大聲</option>
+        </select>
+      </div>
     </div>
     <label class="check"><input type="checkbox" id="mute"> 靜音（拍點條與游標照常）</label>
     <label class="check"><input type="checkbox" id="countin" checked> 先數一小節預備拍</label>
@@ -207,7 +223,7 @@
 
   <p class="railhint">
     <kbd>N</kbd> 換題 · <kbd>P</kbd> 播放 · <kbd>S</kbd> 看和弦代號 · <kbd>M</kbd> 節拍器 ·
-    <kbd>R</kbd> 重來同一題 · <kbd>↑</kbd><kbd>↓</kbd> 調速度<br>
+    <kbd>R</kbd> 重來同一題 · <kbd>H</kbd> 左右手交換 · <kbd>↑</kbd><kbd>↓</kbd> 調速度<br>
     觸控：左滑換下一題 · 右滑開存檔 · 點譜面播放
   </p>
 </aside>

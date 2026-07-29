@@ -1,12 +1,12 @@
 /* 視譜出題的入口。一段練習 = seed + cfg，其他全部由此推導出來。 */
 
 import { Rng, randomSeed } from "../core/rng.js";
-import { parseVexKey, dIdx } from "../core/pitch.js";
+import { N, parseVexKey, dIdx } from "../core/pitch.js";
 import { Key, MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, keysWithin, cycleOfFourths } from "../core/key.js";
-import { tsInfo } from "./rhythm.js";
+import { tsInfo, NOTE_DENSITY, densityMode } from "./rhythm.js";
 import { buildHarmony, cadenceKind } from "./harmony.js";
 import { melodyLine, scalePool, degreeMap } from "./melody.js";
-import { bassLine, chordPad, availablePatterns, LH_PATTERNS } from "./bass.js";
+import { bassLine, availablePatterns, LH_PATTERNS } from "./bass.js";
 
 /* 難度不再綁死調名清單，改成「調號數上限」——
    所以每個難度都自然涵蓋到該範圍內的全部調，含小調。 */
@@ -29,11 +29,14 @@ export const KEY_POOLS = [
 ];
 
 export const HAND_MODES = [
-  {id:"both", label:"雙手", clef:"grand"},
-  {id:"swap", label:"雙手（左手旋律）", clef:"grand"},
-  {id:"rh",   label:"只有右手", clef:"treble"},
-  {id:"lh",   label:"只有左手", clef:"bass"}
+  {id:"both", label:"雙手 · 右手主旋律", short:"右手主旋律", clef:"grand"},
+  {id:"swap", label:"雙手 · 左手主旋律", short:"左手主旋律", clef:"grand"},
+  {id:"rh",   label:"只有右手",         short:"只有右手",   clef:"treble"},
+  {id:"lh",   label:"只有左手",         short:"只有左手",   clef:"bass"}
 ];
+
+/* 交換練：同一段譜換一隻手當主角。只有主旋律換手，其他全部不動。 */
+export const HAND_SWAP = {both:"swap", swap:"both", rh:"lh", lh:"rh"};
 
 export function resolveKeyPool(level, poolId){
   const spec = LEVELS[level - 1];
@@ -60,8 +63,23 @@ function range(spec, which){
   return {lo: parseVexKey(spec[which][0]), hi: parseVexKey(spec[which][1])};
 }
 
+/* 伴奏得放得下和弦。第一級的旋律音域只有五度，直接拿來排三個音會全疊在同一格，
+   所以伴奏那一隻手至少給到一個八度。 */
+function chordRange(r){
+  if (dIdx(r.hi) - dIdx(r.lo) >= 7) return r;
+  return {lo: r.lo, hi: N(r.lo.l, r.lo.a, r.lo.o + 1)};
+}
+
+function lastNoteOf(measures){
+  for (let i = measures.length - 1; i >= 0; i--){
+    const line = measures[i];
+    for (let k = line.length - 1; k >= 0; k--) if (!line[k].rest) return line[k].note;
+  }
+  return null;
+}
+
 /**
- * @param {object} cfg {level, keyPool|key, ts, hands, lhPattern, bars, step, startIndex, seed}
+ * @param {object} cfg {level, keyPool|key, ts, hands, lhPattern, bars, density, step, startIndex, seed}
  */
 export function generateExercise(cfg){
   const seed = (cfg.seed === undefined || cfg.seed === null) ? randomSeed() : cfg.seed;
@@ -74,21 +92,22 @@ export function generateExercise(cfg){
   const beats = tsInfo(ts).beats;
   const barCount = cfg.bars;
   const hands = cfg.hands || "both";
+  const density = densityMode(cfg.density).id;
   const clef = (HAND_MODES.find(h => h.id === hands) || HAND_MODES[0]).clef;
 
   const H = buildHarmony(rng.fork("harmony"), key, barCount,
                          {level, beats, mustResolve: !!cfg.mustResolve});
 
   const inner = {
-    level, levelSpec: spec, ts, beats,
+    level, levelSpec: spec, ts, beats, density,
     startIndex: (cfg.startIndex === undefined) ? -1 : cfg.startIndex
   };
 
   const out = {
     seed,
     cfg: {level, keyPool: cfg.keyPool, ts, hands, bars: barCount, step: cfg.step || 0,
-          lhPattern: cfg.lhPattern || null},
-    key, ts, clef, hands, beats,
+          lhPattern: cfg.lhPattern || null, density},
+    key, ts, clef, hands, beats, density,
     harmony: H,
     roman: H.roman,
     measures: [],
@@ -98,7 +117,8 @@ export function generateExercise(cfg){
     createdAt: Date.now()
   };
 
-  /* 旋律走在哪一手 */
+  /* 旋律走在哪一手。旋律永遠在那隻手自己的音域裡寫成 ——
+     所以左手拿旋律時，它落在左手本來就該待的位置，而不是右手音域硬搬下來。 */
   const melodyOnBass = (hands === "lh" || hands === "swap");
   const melRangeKey = melodyOnBass ? "bass" : "treble";
   const melClef = melodyOnBass ? "bass" : "treble";
@@ -121,25 +141,33 @@ export function generateExercise(cfg){
   const mel = melodyLine(rng.fork("melody"),
     Object.assign({}, inner, {__clef: melClef}), H, key, mp, md, Math.round(mp.length * 0.45));
   out.endIndex = mel.endIndex;
+  // 段落銜接是在「產生旋律的那個音域」裡算的，所以回報的是移八度之前的音
+  out.tailNote = lastNoteOf(mel.measures);
 
   if (hands === "rh" || hands === "lh"){
     for (let i = 0; i < barCount; i++) out.measures.push({top: mel.measures[i], bottom: null});
     return out;
   }
 
+  /* 交換練：左手拿旋律，右手接下整套伴奏音型。
+     伴奏跟著換到右手的音域，所以兩手各自都待在該待的位置，不會擠在一起。 */
   if (hands === "swap"){
-    const pad = chordPad(inner, H, range(spec, "treble"), "treble");
-    for (let i = 0; i < barCount; i++) out.measures.push({top: pad[i], bottom: mel.measures[i]});
-    out.lhLabel = "左手旋律 · 右手和弦";
+    const rh = bassLine(rng.fork("lh"), inner, H, key, chordRange(range(spec, "treble")),
+                        mel.measures, cfg.lhPattern, {clef:"treble", dir:+1});
+    out.lhLabel = "右手" + rh.label;
+    out.lhPattern = rh.pattern;
+    out.melodyOn = "bottom";
+    for (let i = 0; i < barCount; i++) out.measures.push({top: rh.measures[i], bottom: mel.measures[i]});
     return out;
   }
 
-  // 雙手：右手旋律 + 左手模式
-  const lh = bassLine(rng.fork("lh"), inner, H, key, range(spec, "bass"), mel.measures, cfg.lhPattern);
-  out.lhLabel = lh.label;
+  // 雙手：右手旋律 + 左手伴奏
+  const lh = bassLine(rng.fork("lh"), inner, H, key, range(spec, "bass"), mel.measures,
+                      cfg.lhPattern, {clef:"bass", dir:-1});
+  out.lhLabel = "左手" + lh.label;
   out.lhPattern = lh.pattern;
   for (let i = 0; i < barCount; i++) out.measures.push({top: mel.measures[i], bottom: lh.measures[i]});
   return out;
 }
 
-export { availablePatterns, LH_PATTERNS };
+export { availablePatterns, LH_PATTERNS, NOTE_DENSITY };

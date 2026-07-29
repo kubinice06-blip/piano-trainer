@@ -101,6 +101,24 @@ export class Stream {
     return this.current();
   }
 
+  /* 就地改一項設定，其餘（seed、和聲、五度圈進度、承接的起始音）原封不動。
+     交換左右手用的就是這個 —— 重新出題會變成另一段，那就不叫交換練了。
+     下一段也要一起改，否則預讀那一列還停在舊的分工。 */
+  restyle(patch){
+    const cur = this.current();
+    if (!cur || !cur.usedCfg) return this.reset();
+    for (let i = 0; i < this.queue.length; i++){
+      const base = this.queue[i] && this.queue[i].usedCfg;
+      if (!base) continue;
+      const cfg = Object.assign({}, base, patch);
+      const ex = generateExercise(cfg);
+      ex.lastNote = lastSoundingNote(ex);
+      ex.usedCfg = cfg;
+      this.queue[i] = ex;
+    }
+    return this.current();
+  }
+
   /* 每一段練過的都建檔。只存 usedCfg —— 一段幾十 bytes，
      要調閱時再用同一份設定重新生一次，譜面保證一模一樣。 */
   _remember(ex){
@@ -134,9 +152,13 @@ export class Stream {
   }
 }
 
+/* 下一段要從上一段的結尾音附近接上，所以看的必須是「旋律」那一行。
+   左手拿旋律時旋律在下面，抓 top 會抓到右手的伴奏，接出來的音域整個偏掉。 */
 function lastSoundingNote(ex){
+  if (ex.tailNote) return ex.tailNote;
+  const which = ex.melodyOn === "bottom" ? "bottom" : "top";
   for (let i = ex.measures.length - 1; i >= 0; i--){
-    const line = ex.measures[i].top;
+    const line = ex.measures[i][which] || ex.measures[i].top;
     for (let k = line.length - 1; k >= 0; k--) if (!line[k].rest) return line[k].note;
   }
   return null;

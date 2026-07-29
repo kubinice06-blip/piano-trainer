@@ -12,7 +12,8 @@
 
 import { N, dIdx, absPitch, parseVexKey, isAugmentedSecond } from "../core/pitch.js";
 import { chordAt } from "./harmony.js";
-import { rhythmBank, closingBank, beatsOf, isStrong, DUR } from "./rhythm.js";
+import { rhythmBank, closingBank, beatsOf, isStrong, DUR,
+         pickRhythm, splitChance, effectiveTier } from "./rhythm.js";
 
 /* 依調號在指定音域內排出音階池（低→高） */
 export function scalePool(key, loVexKey, hiVexKey){
@@ -48,16 +49,19 @@ const PHRASE_FORMS = [
   ["A","A2","A","C"], ["A","B","A2","C"], ["A","A","A2","C"]
 ];
 
-/* 動機變形：把節奏切碎或合併，但保留輪廓長度 */
-function varyRhythm(rng, pat, beats){
+/* 動機變形：把節奏切碎或合併，但保留輪廓長度。
+   p 是拆碎的機率、deep 決定要不要連八分音符也拆成十六分 ——
+   兩者都由「音符長短」那個設定決定，所以同一個動機在不同設定下會長出不同的變形。 */
+function varyRhythm(rng, pat, beats, p, deep){
   const out = [];
   for (const d of pat){
-    if (DUR[d] >= 1 && rng.chance(0.45)){
+    if (DUR[d] >= 1 && rng.chance(p)){
       // 一個四分拆成兩個八分
       if (d === "q"){ out.push("8", "8"); continue; }
       if (d === "h"){ out.push("q", "q"); continue; }
       if (d === "qd"){ out.push("q", "8"); continue; }
     }
+    if (deep && d === "8" && rng.chance(p * 0.45)){ out.push("16", "16"); continue; }
     out.push(d);
   }
   const len = out.reduce((a, b) => a + DUR[b], 0);
@@ -65,20 +69,23 @@ function varyRhythm(rng, pat, beats){
 }
 
 function planRhythm(rng, cfg, barCount, beats){
-  const bank = rhythmBank(cfg.ts, cfg.level);
-  const closing = closingBank(cfg.ts, cfg.level);
+  const dens = cfg.density;
+  const bank = rhythmBank(cfg.ts, cfg.level, dens);
+  const closing = closingBank(cfg.ts, cfg.level, dens);
+  const p = splitChance(dens);
+  const deep = effectiveTier(cfg.level, dens) >= 5;
   const form = barCount === 4 ? rng.pick(PHRASE_FORMS)
              : Array.from({length: barCount}, (_, i) =>
                  i === barCount - 1 ? "C" : (i % 4 === 0 ? "A" : (i % 4 === 2 ? "A2" : "B")));
 
   const cells = {};
   return form.map((tag, i) => {
-    if (i === barCount - 1 || tag === "C") return rng.pick(closing);
+    if (i === barCount - 1 || tag === "C") return pickRhythm(rng, closing, dens);
     if (tag === "A2"){
-      cells.A2 = cells.A2 || varyRhythm(rng, cells.A || rng.pick(bank), beats);
+      cells.A2 = cells.A2 || varyRhythm(rng, cells.A || pickRhythm(rng, bank, dens), beats, p, deep);
       return cells.A2.slice();
     }
-    cells[tag] = cells[tag] || rng.pick(bank);
+    cells[tag] = cells[tag] || pickRhythm(rng, bank, dens);
     return cells[tag].slice();
   });
 }

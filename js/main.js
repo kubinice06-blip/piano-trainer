@@ -4,7 +4,8 @@ import { loadVexFlow } from "./render/vexloader.js";
 import { drawExercise, drawChordDrill } from "./render/score.js";
 import { Audio } from "./audio/sound.js";
 import { Metro } from "./audio/metro.js";
-import { LEVELS, KEY_POOLS, HAND_MODES, availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
+import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY,
+         availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
 import { PROGRESSIONS, generateChordDrill, progressionCategories,
          VOICINGS, compPatterns, compLabel } from "./gen/chordprog.js";
 import { MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, cycleOfFourths } from "./core/key.js";
@@ -56,8 +57,19 @@ function fillHands(){
   sel.value = "both";
 }
 
-/* 左手寫法要跟著難度與拍號變 —— 阿爾貝提在 3/4 沒有意義，
-   平行齊奏在只有一隻手的時候也不成立 */
+function fillDensity(){
+  const sel = $("dens");
+  NOTE_DENSITY.forEach(d => {
+    const o = document.createElement("option");
+    o.value = d.id; o.textContent = d.label;
+    sel.appendChild(o);
+  });
+  sel.value = "auto";
+}
+
+/* 伴奏寫法要跟著難度與拍號變 —— 阿爾貝提在 3/4 沒有意義，
+   跟旋律齊奏在只有一隻手的時候也不成立。
+   雙手的兩個方向都有伴奏那一隻手，所以 both 與 swap 都開放。 */
 function refreshLhPatterns(){
   const sel = $("lhpat"), prev = sel.value;
   const level = parseInt($("lv").value, 10);
@@ -76,7 +88,7 @@ function refreshLhPatterns(){
     sel.appendChild(o);
   });
 
-  sel.disabled = (hands !== "both");
+  sel.disabled = (hands !== "both" && hands !== "swap");
   sel.value = Array.from(sel.options).some(o => o.value === prev) ? prev : "";
 }
 
@@ -174,6 +186,18 @@ function currentBpm(){
   return Math.max(30, Math.min(220, parseInt($("bpm").value, 10) || 60));
 }
 
+/* 速度有三個顯示的地方（抽屜的滑桿、抽屜的數字、頂欄），但只能有一個真值。
+   全部走這裡，拖滑桿、打數字、按上下鍵才不會各說各話。 */
+function setBpm(v){
+  const b = Math.max(30, Math.min(220, Math.round(v) || 60));
+  $("bpm").value = String(b);
+  $("tempo").value = String(b);
+  $("temporead").textContent = String(b);
+  $("bpmread").textContent = String(b);
+  if (Metro.on) Metro.bpm = b;
+  return b;
+}
+
 function drawOpts(){
   return {
     showNames: $("shownames").checked,
@@ -190,6 +214,8 @@ function describe(ex){
     ex.ts,
     (HAND_MODES.find(h => h.id === ex.hands) || {}).label
   ];
+  const dens = NOTE_DENSITY.find(d => d.id === ex.density);
+  if (dens && dens.id !== "auto") parts.push(dens.label);
   if (ex.lhLabel) parts.push(ex.lhLabel);
   parts.push(ex.roman.join(" │ "), CADENCE_ZH[ex.cadence] || ex.cadence, "#" + ex.seed.toString(36));
   return parts.join(" · ");
@@ -614,9 +640,35 @@ function readCfg(){
     ts: $("ts").value,
     hands: $("hands").value,
     lhPattern: $("lhpat").value || null,
+    density: $("dens").value,
     bars: parseInt($("bars").value, 10),
     step: state.step
   };
+}
+
+/* 左右手交換練：同一段譜，換一隻手當主角。
+   走 restyle 而不是重新出題 —— 換了題目就不是「同一段」，那就沒得比了。 */
+function swapHands(){
+  if (state.mode !== "read" || !state.stream || !state.stream.current()) return;
+  const sel = $("hands");
+  sel.value = HAND_SWAP[sel.value] || "swap";
+  refreshLhPatterns();
+  Audio.stop(); highlight(null); setPlayLabel(false);
+  state.reviewIdx = -1;
+  $("stage").classList.remove("reviewing");
+  state.stream.restyle({hands: sel.value});
+  renderRead();
+  logCurrent();
+  syncSwapButton();
+}
+
+function syncSwapButton(){
+  const btn = $("swaphands");
+  if (!btn) return;
+  btn.disabled = (state.mode !== "read");
+  const to = HAND_SWAP[$("hands").value];
+  const label = (HAND_MODES.find(h => h.id === to) || {}).short || "";
+  btn.textContent = "⇄ 同一段換手練 → " + label;
 }
 
 function generate(opts){
@@ -651,6 +703,7 @@ function generate(opts){
     renderChord();
   }
   updateRevealButton();
+  syncSwapButton();
 }
 
 function updateRevealButton(){
@@ -899,10 +952,12 @@ function bind(){
   $("play").addEventListener("click", togglePlay);
   $("metro").addEventListener("click", toggleMetro);
 
+  $("swaphands").addEventListener("click", swapHands);
+
   // 出題設定變了，整條佇列都要重來（下一段是用舊設定生的）
   ["lv", "ts", "hands"].forEach(id =>
     $(id).addEventListener("change", () => { refreshLhPatterns(); generate({fresh:true}); }));
-  ["keysel", "bars", "lhpat"].forEach(id =>
+  ["keysel", "bars", "lhpat", "dens"].forEach(id =>
     $(id).addEventListener("change", () => generate({fresh:true})));
   $("flow").addEventListener("change", () => { generate({fresh:true}); });
   ["shownames", "showharm", "showchords"].forEach(id =>
@@ -920,15 +975,16 @@ function bind(){
   $("shownotes").addEventListener("change", redraw);
   $("revealed").addEventListener("change", () => { state.revealed = $("revealed").checked; redraw(); updateRevealButton(); });
 
+  $("tempo").addEventListener("input", function(){ setBpm(parseInt(this.value, 10)); });
+  // 數字框讓人邊打邊清空，所以只在打完（change / blur）時才夾回合法範圍
   $("bpm").addEventListener("input", function(){
-    const v = Math.max(30, Math.min(220, parseInt(this.value, 10) || 60));
-    $("bpmread").textContent = String(v);
-    if (Metro.on) Metro.bpm = v;
+    const v = parseInt(this.value, 10);
+    if (v >= 30 && v <= 220) setBpm(v);
   });
+  $("bpm").addEventListener("change", function(){ setBpm(parseInt(this.value, 10)); });
 
-  $("vol").addEventListener("input", function(){
+  $("vol").addEventListener("change", function(){
     const v = Math.max(0, Math.min(100, parseInt(this.value, 10) || 0));
-    $("volread").textContent = String(v);
     Metro.volume = v / 100;
     if (v > 0 && $("mute").checked){ $("mute").checked = false; Metro.muted = false; }
     renderAudioStatus();
@@ -996,13 +1052,11 @@ function bind(){
     else if (k === "s"){ e.preventDefault(); toggleReveal(); }
     else if (k === "m"){ e.preventDefault(); toggleMetro(); }
     else if (k === "p"){ e.preventDefault(); togglePlay(); }
+    else if (k === "h"){ e.preventDefault(); swapHands(); }
     else if (e.key === "ArrowUp" || e.key === "ArrowDown"){
       e.preventDefault();
       const d = e.key === "ArrowUp" ? 1 : -1;
-      const v = Math.max(30, Math.min(220, (parseInt($("bpm").value, 10) || 60) + d * (e.shiftKey ? 5 : 1)));
-      $("bpm").value = v;
-      $("bpmread").textContent = String(v);
-      if (Metro.on) Metro.bpm = v;
+      setBpm(currentBpm() + d * (e.shiftKey ? 5 : 1));
     }
   });
 
@@ -1028,16 +1082,17 @@ async function boot(){
   Library.load();
   fillLevels();
   fillHands();
+  fillDensity();
   fillKeySelect();
   refreshLhPatterns();
   fillProgressions();
   refreshChordKeys();
-  $("bpmread").textContent = $("bpm").value;
-  $("volread").textContent = $("vol").value;
+  setBpm(parseInt($("bpm").value, 10));
   $("zoomread").textContent = $("zoom").value + "%";
   Metro.volume = parseInt($("vol").value, 10) / 100;
   Metro.muted = $("mute").checked;
   bind();
+  syncSwapButton();
   installAudioUnlock();
   installGestures();
   registerServiceWorker();

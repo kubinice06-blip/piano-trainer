@@ -15,6 +15,39 @@ import { chordAt } from "./harmony.js";
 import { rhythmBank, closingBank, beatsOf, isStrong, DUR,
          pickRhythm, splitChance, effectiveTier } from "./rhythm.js";
 
+/* ---------- 強化練習：把旋律往某一種技巧上壓 ----------
+ *
+ * skel 是骨架層挑下一個音時，各種音程的加分，索引 = 差幾個音級：
+ *   0 原地 · 1 二度（級進）· 2 三度 · 3 四度 · 4 五度 · 5 六度 · 6 七度
+ * 七度永遠是重扣分 —— 那是旋律寫作的禁忌，練跳進也不該練它。
+ *
+ * fill   加花層每一步走幾度（1 = 經過音／鄰音，2 = 三度來回）
+ * struct 「這個音是骨架音」的機率調整。骨架音一定是和弦音，
+ *        所以調高等於音都落在和弦上、跳進更明顯；調低等於加花變長、線條更連貫。
+ */
+export const FOCUS = [
+  {id:"none",   label:"不指定",
+   skel:[-9,  8,   5.5, 2.5, 1.5, 0.4, -8], fill:1, struct:0},
+  {id:"leap",   label:"音程 · 三度以上跳進",
+   skel:[-9,  1.5, 8,   7.5, 6.5, 4.5, -8], fill:2, struct:0.10},
+  {id:"arp",    label:"琶音 · 和弦分解",
+   skel:[-9,  1,   9,   6,   5,   2,   -8], fill:2, struct:0, allStruct:true},
+  {id:"ledger", label:"加線音 · 五線之外",
+   skel:[-9,  8,   5.5, 2.5, 1.5, 0.4, -8], fill:1, struct:0, ledger:true}
+];
+
+export function focusMode(id){
+  for (let i = 0; i < FOCUS.length; i++) if (FOCUS[i].id === id) return FOCUS[i];
+  return FOCUS[0];
+}
+
+/* 五線譜面上「不用加線」的範圍：高音譜表 E4–F5、低音譜表 G2–A3。
+   加線音練習就是要把旋律推到這個範圍以外 —— 那正是視譜最慢的地方。 */
+function needsLedger(note, clef){
+  const m = absPitch(note);
+  return clef === "bass" ? (m < 31 || m > 45) : (m < 52 || m > 65);
+}
+
 /* 依調號在指定音域內排出音階池（低→高） */
 export function scalePool(key, loVexKey, hiVexKey){
   const lo = dIdx(parseVexKey(loVexKey)), hi = dIdx(parseVexKey(hiVexKey));
@@ -116,11 +149,15 @@ function chordDegreesOf(key, chord){
  *   - 優先級進，大跳之後反向
  *   - 跟著輪廓弧線走，高點只有一個
  */
-function buildSkeleton(rng, key, H, pool, degs, anchors, startIdx, lv){
+function buildSkeleton(rng, key, H, pool, degs, anchors, startIdx, lv, F, clef){
   const span = pool.length;
   const nAnchor = anchors.length;
   const climax = Math.max(1, Math.min(nAnchor - 2, Math.round(nAnchor * 0.62)));
-  const lowC = Math.round(span * 0.30), highC = Math.round(span * 0.80);
+  // 加線音練習把輪廓推到音域的兩端，其餘維持在中間偏上（唱得出來的位置）
+  const lowC = Math.round(span * (F.ledger ? 0.06 : 0.30));
+  const highC = Math.round(span * (F.ledger ? 0.96 : 0.80));
+  // 練跳進時不能還照「大跳之後必須反向級進」扣分，不然跳一次就被壓回去
+  const afterLeapPenalty = (F.fill > 1) ? 1.5 : 6;
 
   const out = [];
   let cur = startIdx;
@@ -142,14 +179,8 @@ function buildSkeleton(rng, key, H, pool, degs, anchors, startIdx, lv){
     for (let j = Math.max(0, cur - lv.leap); j <= Math.min(span - 1, cur + lv.leap); j++){
       if (allowed.indexOf(degs[j]) < 0) continue;
       const step = j - cur, d = Math.abs(step);
-      let sc = 0;
-      if (d === 0) sc -= 9;                    // 骨架音原地不動，聽起來就是停滯
-      else if (d === 1) sc += 8;
-      else if (d === 2) sc += 5.5;
-      else if (d === 3) sc += 2.5;
-      else if (d === 4) sc += 1.5;
-      else if (d === 6) sc -= 8;               // 七度，旋律禁忌
-      else sc += 0.4;
+      // 原地不動永遠是停滯；其餘各音程的偏好由「強化練習」那張表決定
+      let sc = F.skel[Math.min(d, 6)];
 
       // 欠解決的音：必須往指定方向級進
       if (pendingResolve){
@@ -158,13 +189,15 @@ function buildSkeleton(rng, key, H, pool, degs, anchors, startIdx, lv){
       }
       // 大跳之後要反向級進
       if (Math.abs(lastStep) > 2){
-        if (d > 2) sc -= 6;
+        if (d > 2) sc -= afterLeapPenalty;
         else if (step !== 0 && (step > 0) !== (lastStep > 0)) sc += 5;
       }
       const prev = withChord(pool, degs, cur, anchors[a - 1] ? anchors[a-1].chord : chord);
       const cand = withChord(pool, degs, j, chord);
       if (d > 0 && Math.abs(absPitch(cand) - absPitch(prev)) === 6) sc -= 9;   // 三全音跳進
       if (isAugmentedSecond(cand, prev)) sc -= 14;                             // 小調的 ♭6→♯7
+      // 練加線音就往五線外走，但不能全部都在外面 —— 線上的音是眼睛的參考點
+      if (F.ledger && needsLedger(cand, clef)) sc += 3.5;
       sc += 3 * (1 - Math.abs(j - target) / span);
       cands.push({j, sc});
     }
@@ -210,7 +243,9 @@ function buildSkeleton(rng, key, H, pool, degs, anchors, startIdx, lv){
  *   −1 +1 +1       → 迴音 / 逃逸音
  *   ±2            → 和弦內的琶音跳進
  */
-function movePlan(rng, disp, steps){
+/* u = 每一步的基本度數。1 是經過音／鄰音；練跳進時給 2，
+   多出來的音就成對走三度來回，而不是黏著相鄰音。 */
+function movePlan(rng, disp, steps, u){
   const s = Math.sign(disp) || (rng.chance(0.5) ? 1 : -1);
   const need = Math.abs(disp);
   const moves = [];
@@ -222,25 +257,25 @@ function movePlan(rng, disp, steps){
   } else {
     for (let i = 0; i < need; i++) moves.push(s);
     let extra = steps - need;
-    // 多出來的音成對來回 —— 這就是鄰音
-    while (extra >= 2){ moves.push(-s); moves.push(s); extra -= 2; }
+    // 多出來的音成對來回 —— u=1 是鄰音，u=2 是三度的來回跳
+    while (extra >= 2){ moves.push(-s * u); moves.push(s * u); extra -= 2; }
     if (extra === 1){
-      // 奇數：把一步併成三度，再補一個反向，形成逃逸音
+      // 奇數：把一步撐大，再補一個反向，位移總和不變（逃逸音）
       const i = moves.indexOf(s);
-      if (i >= 0) moves[i] = s * 2; else moves.push(s * 2);
-      moves.push(-s);
+      if (i >= 0) moves[i] = s * (1 + u); else moves.push(s * (1 + u));
+      moves.push(-s * u);
     }
   }
   return moves;
 }
 
-function diminution(rng, a, b, count, pool, degs, cons){
+function diminution(rng, a, b, count, pool, degs, cons, u){
   if (count <= 0) return [];
   const steps = count + 1;
   const sevenDeg = cons && cons.seventhDeg !== null ? cons.seventhDeg : -1;
 
   for (let attempt = 0; attempt < 12; attempt++){
-    const moves = rng.shuffle(movePlan(rng, b - a, steps));
+    const moves = rng.shuffle(movePlan(rng, b - a, steps, u || 1));
 
     // 七音必須級進下行解決。骨架音是七音時第一步就得往下，
     // 中途踩到七音時下一步也得往下 —— 不合格就重排。
@@ -280,10 +315,13 @@ export function melodyLine(rng, cfg, H, key, pool, degs, rangeCenter){
   const barCount = H.bars.length;
   const beats = cfg.beats;
   const lv = cfg.levelSpec;
+  const F = focusMode(cfg.focus);
   const pats = planRhythm(rng, cfg, barCount, beats);
 
   /* 1. 標出骨架位置：每個音符落在哪一拍、屬於哪個和弦、是不是骨架音。
-        骨架 = 和弦剛換的位置 + 小節的強拍。 */
+        骨架 = 和弦剛換的位置 + 小節的強拍。
+        琶音練習把每個音都當骨架，於是整條都落在和弦音上 —— 那就是琶音。 */
+  const pStruct = Math.max(0, Math.min(1, 0.85 + F.struct));
   const slots = [];              // 全曲攤平：{bar, k, beat, chord, structural}
   for (let mi = 0; mi < barCount; mi++){
     const bts = beatsOf(pats[mi]);
@@ -293,7 +331,7 @@ export function melodyLine(rng, cfg, H, key, pool, degs, rangeCenter){
       const chordStart = Math.abs(beat - sl.beat) < 1e-9;
       slots.push({
         bar: mi, k, beat, chord: sl.chord,
-        structural: chordStart || (isStrong(beat, cfg.ts) && rng.chance(0.85)),
+        structural: !!F.allStruct || chordStart || (isStrong(beat, cfg.ts) && rng.chance(pStruct)),
         isLastBar: mi === barCount - 1
       });
     }
@@ -310,7 +348,7 @@ export function melodyLine(rng, cfg, H, key, pool, degs, rangeCenter){
   /* 2. 骨架 */
   let start = rangeCenter;
   if (cfg.startIndex >= 0 && cfg.startIndex < pool.length) start = cfg.startIndex;
-  const skel = buildSkeleton(rng, key, H, pool, degs, anchors, start, lv);
+  const skel = buildSkeleton(rng, key, H, pool, degs, anchors, start, lv, F, cfg.__clef);
 
   /* 3. 加花填空隙 */
   const idxOf = new Array(slots.length).fill(-1);
@@ -322,10 +360,10 @@ export function melodyLine(rng, cfg, H, key, pool, degs, rangeCenter){
     if (count <= 0) continue;
     const ch = slots[from].chord;
     const sevenDeg = ch && ch.members.seventh ? key.degreeOf(ch.members.seventh.l) : null;
-    const fill = diminution(rng, skel[n], skel[n + 1], count, pool, degs, {
-      seventhDeg: sevenDeg,
-      startIsSeventh: sevenDeg !== null && degs[skel[n]] === sevenDeg
-    });
+    const startIsSeventh = sevenDeg !== null && degs[skel[n]] === sevenDeg;
+    // 七音欠一個級進下行的解決，這一段空隙就不跳 —— 練跳進也不能欠著不還
+    const fill = diminution(rng, skel[n], skel[n + 1], count, pool, degs,
+      {seventhDeg: sevenDeg, startIsSeventh}, startIsSeventh ? 1 : F.fill);
     for (let c = 0; c < count; c++){
       idxOf[from + 1 + c] = (fill && fill[c] !== undefined) ? fill[c] : skel[n];
     }

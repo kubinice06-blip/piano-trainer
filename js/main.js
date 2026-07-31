@@ -4,7 +4,7 @@ import { loadVexFlow } from "./render/vexloader.js";
 import { drawExercise, drawChordDrill } from "./render/score.js";
 import { Audio } from "./audio/sound.js";
 import { Metro } from "./audio/metro.js";
-import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY,
+import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY, FOCUS,
          availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
 import { PROGRESSIONS, generateChordDrill, progressionCategories,
          VOICINGS, compPatterns, compLabel } from "./gen/chordprog.js";
@@ -31,7 +31,8 @@ const state = {
   reviewIdx: -1,       // -1 = 正在練習；>=0 = 正在調閱第幾段存檔
   libId: null,         // 目前這一段在長期紀錄裡的 id
   practiceStart: 0,    // 這一輪節拍器開始的時間，用來累計練習時數
-  playAlongCycle: 0    // 和弦模式跟播到第幾輪
+  playAlongCycle: 0,   // 和弦模式跟播到第幾輪
+  loopCount: 0         // 重複同一段時已經彈完第幾遍
 };
 
 /* ---------- 選單填充 ---------- */
@@ -65,6 +66,16 @@ function fillDensity(){
     sel.appendChild(o);
   });
   sel.value = "auto";
+}
+
+function fillFocus(){
+  const sel = $("focus");
+  FOCUS.forEach(f => {
+    const o = document.createElement("option");
+    o.value = f.id; o.textContent = f.label;
+    sel.appendChild(o);
+  });
+  sel.value = "none";
 }
 
 /* 伴奏寫法要跟著難度與拍號變 —— 阿爾貝提在 3/4 沒有意義，
@@ -198,11 +209,14 @@ function setBpm(v){
   return b;
 }
 
+function isLoop(){ return state.mode === "read" && $("flow").value === "loop"; }
+
 function drawOpts(){
   return {
     showNames: $("shownames").checked,
     showHarmony: $("showharm").checked,
     showChords: $("showchords").checked,
+    repeat: isLoop(),
     zoom: parseInt($("zoom").value, 10) / 100
   };
 }
@@ -216,6 +230,8 @@ function describe(ex){
   ];
   const dens = NOTE_DENSITY.find(d => d.id === ex.density);
   if (dens && dens.id !== "auto") parts.push(dens.label);
+  const foc = FOCUS.find(f => f.id === ex.focus);
+  if (foc && foc.id !== "none") parts.push("強化 " + foc.label);
   if (ex.lhLabel) parts.push(ex.lhLabel);
   parts.push(ex.roman.join(" │ "), CADENCE_ZH[ex.cadence] || ex.cadence, "#" + ex.seed.toString(36));
   return parts.join(" · ");
@@ -641,9 +657,16 @@ function readCfg(){
     hands: $("hands").value,
     lhPattern: $("lhpat").value || null,
     density: $("dens").value,
+    focus: $("focus").value,
     bars: parseInt($("bars").value, 10),
     step: state.step
   };
+}
+
+/* 重複次數的欄位只有在「重複同一段」時才有意義 */
+function syncFlow(){
+  $("repsfield").hidden = ($("flow").value !== "loop");
+  state.loopCount = 0;
 }
 
 /* 左右手交換練：同一段譜，換一隻手當主角。
@@ -678,6 +701,7 @@ function generate(opts){
   setPlayLabel(false);
   state.revealed = $("revealed").checked;
   state.reviewIdx = -1;
+  state.loopCount = 0;
   $("stage").classList.remove("reviewing");
 
   if (state.mode === "read"){
@@ -797,11 +821,20 @@ function buildBeatStrip(n){
   }
 }
 
+/* 頂欄那一格：重複模式要看得到現在是第幾遍，不然反覆記號等於沒有回饋 */
+function liveLabel(){
+  if (!isLoop()) return "進行中";
+  const lim = repeatLimit();
+  return "第 " + (state.loopCount + 1) + (lim ? " / " + lim : "") + " 遍";
+}
+
+function repeatLimit(){ return parseInt($("reps").value, 10) || 0; }   // 0 = 一直重複
+
 Metro.onBeat = (i, counting) => {
   const cells = $("beatstrip").children;
   for (let k = 0; k < cells.length; k++) cells[k].classList.remove("on");
   if (cells[i]) cells[i].classList.add("on");
-  $("clipmeta").textContent = counting ? "預備" : "進行中";
+  $("clipmeta").textContent = counting ? "預備" : liveLabel();
   updateCursor();          // rAF 被節流時，靠這裡把游標推下去
 };
 
@@ -812,11 +845,26 @@ Metro.onBar = (barsDone) => {
   const cur = state.stream.current();
   if (!cur) return;
   // 彈滿一整段才換 —— 舊版在最後一小節的第一拍就換，等於少給一小節
-  if (barsDone - state.stream.segStartBar >= cur.cfg.bars){
-    Audio.stop(); highlight(null); setPlayLabel(false);
-    advanceSegment(barsDone);
-    startPlayAlong();          // 新的一段接著播，中間不斷
+  if (barsDone - state.stream.segStartBar < cur.cfg.bars) return;
+
+  Audio.stop(); highlight(null); setPlayLabel(false);
+
+  /* 重複同一段：不換譜、不重畫，只把段落起點對到現在，游標就回到第一小節。
+     次數滿了才真的往下一段走。 */
+  if (isLoop()){
+    state.loopCount++;
+    const lim = repeatLimit();
+    if (!lim || state.loopCount < lim){
+      state.stream.segStartBar = barsDone;
+      $("clipmeta").textContent = liveLabel();
+      startPlayAlong();
+      return;
+    }
+    state.loopCount = 0;
   }
+
+  advanceSegment(barsDone);
+  startPlayAlong();          // 新的一段接著播，中間不斷
 };
 
 function toggleMetro(){
@@ -843,6 +891,7 @@ function toggleMetro(){
   $("barcount").textContent = "0";
   if (state.stream) state.stream.segStartBar = 0;
   state.playAlongCycle = 0;
+  state.loopCount = 0;
   if (!Metro.start(currentBpm(), beats, $("countin").checked ? 1 : 0)){
     $("clipmeta").textContent = "此瀏覽器不支援音訊";
     return;
@@ -957,9 +1006,11 @@ function bind(){
   // 出題設定變了，整條佇列都要重來（下一段是用舊設定生的）
   ["lv", "ts", "hands"].forEach(id =>
     $(id).addEventListener("change", () => { refreshLhPatterns(); generate({fresh:true}); }));
-  ["keysel", "bars", "lhpat", "dens"].forEach(id =>
+  ["keysel", "bars", "lhpat", "dens", "focus"].forEach(id =>
     $(id).addEventListener("change", () => generate({fresh:true})));
-  $("flow").addEventListener("change", () => { generate({fresh:true}); });
+  // 換流程不必換題目 —— 只是重畫（反覆記號、預讀那一列）並歸零遍數
+  $("flow").addEventListener("change", () => { syncFlow(); redraw(); });
+  $("reps").addEventListener("change", () => { state.loopCount = 0; });
   ["shownames", "showharm", "showchords"].forEach(id =>
     $(id).addEventListener("change", () => { redraw(); updateRevealButton(); }));
 
@@ -1083,6 +1134,7 @@ async function boot(){
   fillLevels();
   fillHands();
   fillDensity();
+  fillFocus();
   fillKeySelect();
   refreshLhPatterns();
   fillProgressions();
@@ -1092,6 +1144,7 @@ async function boot(){
   Metro.volume = parseInt($("vol").value, 10) / 100;
   Metro.muted = $("mute").checked;
   bind();
+  syncFlow();
   syncSwapButton();
   installAudioUnlock();
   installGestures();

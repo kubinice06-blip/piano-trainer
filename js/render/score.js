@@ -159,13 +159,18 @@ export function drawExercise(el, ex, opts){
       var isFirst = (mi === from);
       var w = mw + (isFirst ? head : 0);
 
+      // 重複同一段時畫反覆記號，眼睛才知道要繞回去
+      var isHead = (mi === 0), isTail = (mi === ex.measures.length - 1);
+      var endBar = isTail ? (o.repeat ? VF.Barline.type.REPEAT_END : VF.Barline.type.END) : null;
+
       var st = new VF.Stave(x, y, w);
       if (isFirst){
         st.addClef(grand ? "treble" : ex.clef);
         st.addKeySignature(vexSig);
         if (li === 0) st.addTimeSignature(ex.ts);
       }
-      if (mi === ex.measures.length - 1) st.setEndBarType(VF.Barline.type.END);
+      if (o.repeat && isHead) st.setBegBarType(VF.Barline.type.REPEAT_BEGIN);
+      if (endBar !== null) st.setEndBarType(endBar);
       st.setContext(ctx).draw();
       topStaves.push(st);
 
@@ -177,7 +182,8 @@ export function drawExercise(el, ex, opts){
           sb.addKeySignature(vexSig);
           if (li === 0) sb.addTimeSignature(ex.ts);
         }
-        if (mi === ex.measures.length - 1) sb.setEndBarType(VF.Barline.type.END);
+        if (o.repeat && isHead) sb.setBegBarType(VF.Barline.type.REPEAT_BEGIN);
+        if (endBar !== null) sb.setEndBarType(endBar);
         sb.setContext(ctx).draw();
         botStaves.push(sb);
         if (isFirst){

@@ -56,6 +56,10 @@
         <label for="dens">音符長短</label>
         <select id="dens"></select>
       </div>
+      <div class="field">
+        <label for="focus">強化練習</label>
+        <select id="focus"></select>
+      </div>
       <div class="row2">
         <div class="field">
           <label for="hands">練習手</label>
@@ -90,10 +94,20 @@
           <label for="flow">練習流程</label>
           <select id="flow">
             <option value="flow" selected>連續流 · 預讀</option>
+            <option value="loop">重複同一段</option>
             <option value="auto">段落結束換題</option>
             <option value="manual">手動換題</option>
           </select>
         </div>
+      </div>
+      <div class="field" id="repsfield" hidden>
+        <label for="reps">重複幾遍後換下一段</label>
+        <select id="reps">
+          <option value="0">一直重複同一段</option>
+          <option value="2">2 遍</option>
+          <option value="4" selected>4 遍</option>
+          <option value="8">8 遍</option>
+        </select>
       </div>
       <label class="check"><input type="checkbox" id="showchords"> 標出和弦代號</label>
       <label class="check"><input type="checkbox" id="showharm"> 標出和聲級數（羅馬數字）</label>

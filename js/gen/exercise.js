@@ -5,7 +5,7 @@ import { N, parseVexKey, dIdx } from "../core/pitch.js";
 import { Key, MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, keysWithin, cycleOfFourths } from "../core/key.js";
 import { tsInfo, NOTE_DENSITY, densityMode } from "./rhythm.js";
 import { buildHarmony, cadenceKind } from "./harmony.js";
-import { melodyLine, scalePool, degreeMap } from "./melody.js";
+import { melodyLine, scalePool, degreeMap, FOCUS, focusMode } from "./melody.js";
 import { bassLine, availablePatterns, LH_PATTERNS } from "./bass.js";
 
 /* 難度不再綁死調名清單，改成「調號數上限」——
@@ -93,21 +93,22 @@ export function generateExercise(cfg){
   const barCount = cfg.bars;
   const hands = cfg.hands || "both";
   const density = densityMode(cfg.density).id;
+  const focus = focusMode(cfg.focus).id;
   const clef = (HAND_MODES.find(h => h.id === hands) || HAND_MODES[0]).clef;
 
   const H = buildHarmony(rng.fork("harmony"), key, barCount,
                          {level, beats, mustResolve: !!cfg.mustResolve});
 
   const inner = {
-    level, levelSpec: spec, ts, beats, density,
+    level, levelSpec: spec, ts, beats, density, focus,
     startIndex: (cfg.startIndex === undefined) ? -1 : cfg.startIndex
   };
 
   const out = {
     seed,
     cfg: {level, keyPool: cfg.keyPool, ts, hands, bars: barCount, step: cfg.step || 0,
-          lhPattern: cfg.lhPattern || null, density},
-    key, ts, clef, hands, beats, density,
+          lhPattern: cfg.lhPattern || null, density, focus},
+    key, ts, clef, hands, beats, density, focus,
     harmony: H,
     roman: H.roman,
     measures: [],
@@ -170,4 +171,4 @@ export function generateExercise(cfg){
   return out;
 }
 
-export { availablePatterns, LH_PATTERNS, NOTE_DENSITY };
+export { availablePatterns, LH_PATTERNS, NOTE_DENSITY, FOCUS };

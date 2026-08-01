@@ -192,6 +192,34 @@ export function buildHarmony(rng, key, barCount, opts){
   const mode = key.isMinor ? "minor" : "major";
   const maxCx = LEVEL_COMPLEXITY[Math.min(level, 6) - 1];
 
+  // A weakness review preserves the harmonic fingerprint but re-realises the
+  // melody, voicing and seed. Invalid/obsolete tokens safely fall back to the
+  // regular generator below.
+  const preferred = Array.isArray(o.preferredBars) ? o.preferredBars.slice(0, barCount) : null;
+  if (preferred?.length === barCount && preferred.every((bar) => Array.isArray(bar) && bar.length)){
+    try {
+      const preferredBars = preferred.map((bar) => {
+        const slots = bar.map((tok, i) => ({
+          beat:i * (beats / bar.length),
+          beats:beats / bar.length,
+          token:String(tok),
+          chord:realizeChord(key, parseToken(String(tok))),
+        }));
+        if (slots.some((slot) => !slot.chord)) throw new Error("invalid harmony fingerprint");
+        return {slots};
+      });
+      const preferredTokens = preferred.flat().map(String);
+      return {
+        bars:preferredBars,
+        tokens:preferredTokens,
+        roman:preferredBars.map((bar) => bar.slots.map((slot) => slot.token).join(" ")),
+        cadence:"review",
+      };
+    } catch {
+      // Continue with a newly sampled progression.
+    }
+  }
+
   const vocab = VOCAB[mode];
   const vocabSet = new Set(Object.keys(vocab).filter(t => vocab[t].cx <= maxCx));
   const edgeMap = edges(mode, vocabSet);

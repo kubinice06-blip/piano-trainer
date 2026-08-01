@@ -7,6 +7,11 @@ import { tsInfo, NOTE_DENSITY, densityMode } from "./rhythm.js";
 import { buildHarmony, cadenceKind } from "./harmony.js";
 import { melodyLine, scalePool, degreeMap, FOCUS, focusMode } from "./melody.js";
 import { bassLine, availablePatterns, LH_PATTERNS, INVERSIONS, inversionMode } from "./bass.js";
+import { normaliseVector, generatorLevels } from "../adaptive.js";
+
+/* Stored with every new exercise/attempt. Increment this whenever a generator
+   change can make the same seed + settings produce a different score. */
+export const GENERATOR_VERSION = 2;
 
 /* 難度不再綁死調名清單，改成「調號數上限」——
    所以每個難度都自然涵蓋到該範圍內的全部調，含小調。 */
@@ -85,30 +90,37 @@ export function generateExercise(cfg){
   const seed = (cfg.seed === undefined || cfg.seed === null) ? randomSeed() : cfg.seed;
   const rng = new Rng(seed);
 
-  const level = cfg.level;
-  const spec = LEVELS[level - 1];
-  const key = cfg.key instanceof Key ? cfg.key : chooseKey(rng, level, cfg.keyPool, cfg.step);
+  const level = Math.max(1, Math.min(6, Number(cfg.level) || 1));
+  const difficulty = normaliseVector(cfg.difficulty, level);
+  const axis = generatorLevels(difficulty);
+  const spec = LEVELS[axis.rangeLevel - 1];
+  const key = cfg.key instanceof Key ? cfg.key : chooseKey(rng, axis.keyLevel, cfg.keyPool, cfg.step);
   const ts = cfg.ts;
   const beats = tsInfo(ts).beats;
   const barCount = cfg.bars;
   const hands = cfg.hands || "both";
-  const density = densityMode(cfg.density).id;
+  const density = densityMode(cfg.density || axis.density).id;
   const focus = focusMode(cfg.focus).id;
   const inversion = inversionMode(cfg.inversion);
   const clef = (HAND_MODES.find(h => h.id === hands) || HAND_MODES[0]).clef;
 
   const H = buildHarmony(rng.fork("harmony"), key, barCount,
-                         {level, beats, mustResolve: !!cfg.mustResolve});
+                         {level:Math.max(axis.rhythmLevel, axis.textureLevel), beats,
+                          mustResolve: !!cfg.mustResolve,
+                          preferredBars:cfg.preferredHarmonyBars});
 
   const inner = {
-    level, levelSpec: spec, ts, beats, density, focus,
+    level:axis.rhythmLevel, textureLevel:axis.textureLevel, levelSpec: spec, ts, beats, density, focus,
+    preferredRhythms:cfg.preferredRhythms,
     startIndex: (cfg.startIndex === undefined) ? -1 : cfg.startIndex
   };
 
   const out = {
     seed,
-    cfg: {level, keyPool: cfg.keyPool, ts, hands, bars: barCount, step: cfg.step || 0,
+    generatorVersion: GENERATOR_VERSION,
+    cfg: {level, difficulty, keyPool: cfg.keyPool, ts, hands, bars: barCount, step: cfg.step || 0,
           lhPattern: cfg.lhPattern || null, density, focus, inversion},
+    difficulty,
     key, ts, clef, hands, beats, density, focus, inversion,
     harmony: H,
     roman: H.roman,

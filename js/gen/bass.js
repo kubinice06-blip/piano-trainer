@@ -295,8 +295,9 @@ export function bassLine(rng, cfg, H, key, range, melody, forced, opts){
   const lo = dIdx(range.lo), hi = dIdx(range.hi);
   const up = (o.dir || -1) > 0;
   let name = forced;
+  const textureLevel = cfg.textureLevel || cfg.level;
   if (!name || !LH_PATTERNS[name]){
-    const avail = availablePatterns(cfg.level, cfg.ts)
+    const avail = availablePatterns(textureLevel, cfg.ts)
       .filter(k => !LH_PATTERNS[k].needsMelody || melody);
     name = rng.pick(avail);
   }
@@ -304,7 +305,7 @@ export function bassLine(rng, cfg, H, key, range, melody, forced, opts){
 
   const anchor = pickAnchor(rng, lo, hi, up, melody);
   const invMode = inversionMode(o.inversion);
-  const pickInv = inversionPicker(rng, invMode, cfg.level, lo, hi, anchor);
+  const pickInv = inversionPicker(rng, invMode, textureLevel, lo, hi, anchor);
 
   return {
     pattern: name,

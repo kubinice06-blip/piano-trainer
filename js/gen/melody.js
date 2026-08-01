@@ -13,7 +13,7 @@
 import { N, dIdx, absPitch, parseVexKey, isAugmentedSecond } from "../core/pitch.js";
 import { chordAt } from "./harmony.js";
 import { rhythmBank, closingBank, beatsOf, isStrong, DUR,
-         pickRhythm, splitChance, effectiveTier } from "./rhythm.js";
+         pickRhythm, splitChance, effectiveTier, patternLength } from "./rhythm.js";
 
 /* ---------- 強化練習：把旋律往某一種技巧上壓 ----------
  *
@@ -102,6 +102,13 @@ function varyRhythm(rng, pat, beats, p, deep){
 }
 
 function planRhythm(rng, cfg, barCount, beats){
+  const preferred = Array.isArray(cfg.preferredRhythms) ? cfg.preferredRhythms : null;
+  if (preferred?.length >= barCount){
+    const valid = preferred.slice(0, barCount).every((cell) =>
+      Array.isArray(cell) && cell.length && cell.every((dur) => DUR[dur]) &&
+      Math.abs(patternLength(cell) - beats) < 1e-9);
+    if (valid) return preferred.slice(0, barCount).map((cell) => cell.slice());
+  }
   const dens = cfg.density;
   const bank = rhythmBank(cfg.ts, cfg.level, dens);
   const closing = closingBank(cfg.ts, cfg.level, dens);

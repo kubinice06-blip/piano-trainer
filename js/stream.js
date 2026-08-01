@@ -25,7 +25,8 @@ export class Stream {
   /* 依上一段的結尾決定下一段怎麼接 */
   _make(prev, seed){
     const cfg = this.readCfg();
-    cfg.seed = seed;
+    const fixedSeed = cfg.seed !== undefined && cfg.seed !== null;
+    if (seed !== undefined) cfg.seed = seed;
     cfg.step = this.step;
     if (prev){
       // 音域承接：從上一段最後一個音附近起頭，不會突然跳兩個八度
@@ -38,7 +39,7 @@ export class Stream {
     /* 連著好幾段同樣的和聲進行，聽起來就是一直在重複 —— 每一段各自隨機是不夠的。
        做法是「換一顆 seed 重生」而不是在產生器裡重抽：
        usedCfg 裡就仍然只有一顆 seed，回顧與列印才重現得出一模一樣的譜。 */
-    if (seed === undefined){
+    if (seed === undefined && !fixedSeed){
       const recent = this.recentProgressions();
       for (let t = 0; t < 6 && recent.indexOf(ex.harmony.tokens.join(" ")) >= 0; t++){
         cfg.seed = randomSeed();
@@ -49,7 +50,7 @@ export class Stream {
     ex.lastNote = lastSoundingNote(ex);
     // 把真正用過的設定原封不動留著。重現一段練習光有 seed 不夠 ——
     // 五度圈進度、承接上一段的起始音都是輸入的一部分。
-    ex.usedCfg = Object.assign({}, cfg, {seed: ex.seed});
+    ex.usedCfg = Object.assign({}, cfg, {seed: ex.seed, generatorVersion: ex.generatorVersion});
     return ex;
   }
 

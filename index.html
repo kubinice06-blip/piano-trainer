@@ -48,22 +48,10 @@
   <div id="panel-read">
     <fieldset>
       <legend>出題</legend>
-      <div class="field">
-        <label for="lv">難度</label>
-        <select id="lv"></select>
-      </div>
-      <div class="field">
-        <label for="dens">音符長短</label>
-        <select id="dens"></select>
-      </div>
-      <div class="field">
-        <label for="focus">強化練習</label>
-        <select id="focus"></select>
-      </div>
       <div class="row2">
         <div class="field">
-          <label for="hands">練習手</label>
-          <select id="hands"></select>
+          <label for="lv">難度</label>
+          <select id="lv"></select>
         </div>
         <div class="field">
           <label for="ts">拍號</label>
@@ -74,24 +62,48 @@
           </select>
         </div>
       </div>
-      <button class="btn btn-ghost" id="swaphands" style="width:100%;margin-bottom:11px">⇄ 左右手交換練同一段</button>
-      <div class="field">
-        <label for="lhpat">伴奏寫法（沒拿旋律的那隻手）</label>
-        <select id="lhpat"></select>
-      </div>
       <div class="field">
         <label for="keysel">調性</label>
         <select id="keysel"></select>
       </div>
+      <div class="field">
+        <label for="dens">音符長短</label>
+        <select id="dens"></select>
+      </div>
+      <div class="field">
+        <label for="focus">強化練習</label>
+        <select id="focus"></select>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>兩手與伴奏</legend>
+      <div class="field">
+        <label for="hands">練習手</label>
+        <select id="hands"></select>
+      </div>
+      <button class="btn btn-ghost btn-wide" id="swaphands">⇄ 左右手交換練同一段</button>
+      <div class="field">
+        <label for="lhpat">伴奏寫法<small class="hint">沒拿旋律的那隻手</small></label>
+        <select id="lhpat"></select>
+      </div>
+      <div class="field">
+        <label for="inv">練轉位<small class="hint">伴奏和弦的低音要放哪一個音</small></label>
+        <select id="inv"></select>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>練習流程</legend>
       <div class="row2">
         <div class="field">
-          <label for="bars">小節數</label>
+          <label for="bars">一段幾小節</label>
           <select id="bars">
             <option>2</option><option selected>4</option><option>8</option><option>12</option>
           </select>
         </div>
         <div class="field">
-          <label for="flow">練習流程</label>
+          <label for="flow">流程</label>
           <select id="flow">
             <option value="flow" selected>連續流 · 預讀</option>
             <option value="loop">重複同一段</option>
@@ -109,8 +121,12 @@
           <option value="8">8 遍</option>
         </select>
       </div>
-      <label class="check"><input type="checkbox" id="showchords"> 標出和弦代號</label>
-      <label class="check"><input type="checkbox" id="showharm"> 標出和聲級數（羅馬數字）</label>
+    </fieldset>
+
+    <fieldset>
+      <legend>譜上要標什麼</legend>
+      <label class="check"><input type="checkbox" id="showchords"> 和弦代號（C、G7…）</label>
+      <label class="check"><input type="checkbox" id="showharm"> 和聲級數（I、V7…）</label>
       <label class="check"><input type="checkbox" id="shownames"> 譜下標音名</label>
     </fieldset>
   </div>

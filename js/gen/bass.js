@@ -46,18 +46,15 @@ function place(note, loIdx, hiIdx){
   return n;
 }
 
-/* 和弦成員：0=低音（依轉位）、1、2… 往上疊。
+/* 和弦成員：0=低音、1、2… 往上疊。ns 是已經套過轉位的音陣列。
  *
  * 舊寫法只做「超出音域才移八度」，於是和弦常常整團停在音域頂端，
  * 實測第 4 級有三成的小節左手爬到右手旋律上面去。
- * 現在低音會主動貼到該貼的那一端，其餘成員從它往上堆：
- *   伴奏在旋律下方（左手）→ 貼音域下緣
- *   伴奏在旋律上方（右手）→ 貼音域上緣往下留一個八度給整團和弦
+ * 現在低音會主動貼到 anchor，其餘成員從它往上堆。
+ * anchor 由呼叫端決定 —— 每一題會在音域裡挑不同的落點，
+ * 左手才不會每一題都從同一個 C2 開始。
  */
-function member(chord, i, lo, hi, up){
-  const ns = chord.notes;
-  const anchor = up ? Math.max(lo, hi - 7) : lo;
-
+function member(ns, i, lo, hi, anchor){
   let base = ns[0];
   let guard = 0;
   while (dIdx(base) < anchor && guard++ < 12) base = N(base.l, base.a, base.o + 1);
@@ -76,6 +73,63 @@ function member(chord, i, lo, hi, up){
   return n;
 }
 
+/* ---------- 轉位 ---------- */
+
+/* 注意「照和聲原樣」不等於「全部都是原位」——
+   和聲進行本身就會出現 I6、V65 這種帶轉位的級數，那是和聲的一部分。
+   這一欄控制的是「伴奏那隻手要不要再另外轉位」。 */
+export const INVERSIONS = [
+  {id:"auto",   label:"依難度（低階原樣・高階最省力）"},
+  {id:"root",   label:"照和聲原樣，不另外轉位"},
+  {id:"smooth", label:"最省力（自動選最近的轉位）"},
+  {id:"mix",    label:"隨機轉位"},
+  {id:"cycle",  label:"輪替：原位 → 第一 → 第二"},
+  {id:"first",  label:"只練第一轉位（三音在低音）"},
+  {id:"second", label:"只練第二轉位（五音在低音）"}
+];
+
+export function inversionMode(id){
+  for (let i = 0; i < INVERSIONS.length; i++) if (INVERSIONS[i].id === id) return INVERSIONS[i].id;
+  return "auto";
+}
+
+/* 轉位就是把低音搬到上面去。只在前三個音之間轉 ——
+   七和弦的第三轉位（七音在低音）對這個階段的左手來說太難按。 */
+function rotate(ns, k){
+  const n = Math.min(ns.length, 3);
+  const j = ((k % n) + n) % n;
+  if (!j) return ns;
+  return ns.slice(j).concat(ns.slice(0, j).map(x => N(x.l, x.a, x.o + 1)));
+}
+
+/* 一整段共用一個轉位策略。smooth 要記得上一個和弦的低音在哪。 */
+function inversionPicker(rng, mode, level, lo, hi, anchor){
+  const m = (mode === "auto") ? (level <= 2 ? "root" : "smooth") : mode;
+  let step = 0, prevBass = null;
+
+  return function(chord){
+    const ns = chord.notes;
+    let inv = 0;
+    if (m === "first")       inv = 1;
+    else if (m === "second") inv = 2;
+    else if (m === "cycle")  inv = (step++) % 3;
+    else if (m === "mix")    inv = rng.int(3);
+    else if (m === "smooth"){
+      // 低音離上一個和弦最近的那個轉位 —— 手不用跑，這就是導音連接
+      let best = 0, bd = 1e9;
+      for (let k = 0; k < 3; k++){
+        const b = member(rotate(ns, k), 0, lo, hi, anchor);
+        const d = (prevBass === null) ? 0 : Math.abs(dIdx(b) - prevBass);
+        if (d < bd){ bd = d; best = k; }
+      }
+      inv = best;
+    }
+    const out = rotate(ns, inv);
+    prevBass = dIdx(member(out, 0, lo, hi, anchor));
+    return out;
+  };
+}
+
 /* 依字母級數往下找音（平行三六度用） */
 function diatonicBelow(key, note, steps, chord){
   const raw = note.l - steps;
@@ -91,7 +145,15 @@ function patternNotes(rng, name, ctx){
   const clef = ctx.clef || "bass";
   const dir = ctx.dir || -1;          // 伴奏走在旋律的下方（-1，左手）或上方（+1，右手）
   const beats = cfg.beats;
-  const mem = (ch, i) => member(ch, i, lo, hi, dir > 0);
+  const anchor = ctx.anchor;
+  const pickInv = ctx.pickInv;
+  // 同一個和弦在同一小節內要用同一個轉位，所以先解析再重複使用
+  const voiced = new Map();
+  const V = (ch) => {
+    if (!voiced.has(ch)) voiced.set(ch, pickInv(ch));
+    return voiced.get(ch);
+  };
+  const mem = (ch, i) => member(V(ch), i, lo, hi, anchor);
   const out = [];
 
   for (let mi = 0; mi < H.bars.length; mi++){
@@ -123,7 +185,7 @@ function patternNotes(rng, name, ctx){
       slots.forEach(sl => {
         const d = sl.beats === 4 ? "w" : sl.beats === 3 ? "hd" : sl.beats === 2 ? "h" : "q";
         const ch = sl.chord;
-        bar.push({rest:false, chordNotes: ch.notes.slice(0, 3).map((n, i) => mem(ch, i)),
+        bar.push({rest:false, chordNotes: V(ch).slice(0, 3).map((n, i) => mem(ch, i)),
                   note: mem(ch, 0), dur: d, clef, bar:mi});
       });
 
@@ -198,14 +260,36 @@ function patternNotes(rng, name, ctx){
   return out;
 }
 
+/* 這一題的伴奏落在音域的哪個位置。
+   永遠貼著音域下緣，結果就是每一題的左手都從同一個 C2 開始 ——
+   那正是「左手聽起來一直在重複」的來源。音域放得下就往上挪，
+   以四度／八度為單位，落點才不會怪。 */
+function pickAnchor(rng, lo, hi, up, melody){
+  if (up) return Math.max(lo, hi - 7);        // 在旋律上方的那隻手貼上緣，不然會壓到旋律
+  let room = hi - lo - 7;
+  if (room <= 0) return lo;
+
+  // 但整團和弦要留在旋律最低音之下，不然抬高的代價就是兩手疊在一起
+  if (melody){
+    let melLo = 1e9;
+    melody.forEach(bar => bar.forEach(it => {
+      if (!it.rest && it.note) melLo = Math.min(melLo, dIdx(it.note));
+    }));
+    if (melLo < 1e9) room = Math.min(room, melLo - 5 - lo);
+  }
+  const steps = [0, 4, 7, 11].filter(v => v <= room);
+  return lo + (steps.length ? rng.pick(steps) : 0);
+}
+
 /**
  * 伴奏聲部。
  * @param {string} forced 指定模式；不給就依難度隨機
- * @param {object} opts   {clef:"bass"|"treble", dir:-1|+1} —— 這隻手在旋律的下方還是上方
+ * @param {object} opts   {clef, dir:-1|+1, inversion} —— 這隻手在旋律的下方還是上方、練哪種轉位
  */
 export function bassLine(rng, cfg, H, key, range, melody, forced, opts){
   const o = opts || {};
   const lo = dIdx(range.lo), hi = dIdx(range.hi);
+  const up = (o.dir || -1) > 0;
   let name = forced;
   if (!name || !LH_PATTERNS[name]){
     const avail = availablePatterns(cfg.level, cfg.ts)
@@ -214,10 +298,15 @@ export function bassLine(rng, cfg, H, key, range, melody, forced, opts){
   }
   if (LH_PATTERNS[name] && LH_PATTERNS[name].needsMelody && !melody) name = "sustain";
 
+  const anchor = pickAnchor(rng, lo, hi, up, melody);
+  const invMode = inversionMode(o.inversion);
+  const pickInv = inversionPicker(rng, invMode, cfg.level, lo, hi, anchor);
+
   return {
     pattern: name,
     label: LH_PATTERNS[name] ? LH_PATTERNS[name].label : name,
-    measures: patternNotes(rng, name, {H, key, cfg, lo, hi, melody,
+    inversion: invMode,
+    measures: patternNotes(rng, name, {H, key, cfg, lo, hi, melody, anchor, pickInv,
                                        clef: o.clef || "bass", dir: o.dir || -1})
   };
 }

@@ -4,7 +4,7 @@ import { loadVexFlow } from "./render/vexloader.js";
 import { drawExercise, drawChordDrill } from "./render/score.js";
 import { Audio } from "./audio/sound.js";
 import { Metro } from "./audio/metro.js";
-import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY, FOCUS,
+import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY, FOCUS, INVERSIONS,
          availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
 import { PROGRESSIONS, generateChordDrill, progressionCategories,
          VOICINGS, compPatterns, compLabel } from "./gen/chordprog.js";
@@ -78,6 +78,16 @@ function fillFocus(){
   sel.value = "none";
 }
 
+function fillInversions(){
+  const sel = $("inv");
+  INVERSIONS.forEach(v => {
+    const o = document.createElement("option");
+    o.value = v.id; o.textContent = v.label;
+    sel.appendChild(o);
+  });
+  sel.value = "auto";
+}
+
 /* 伴奏寫法要跟著難度與拍號變 —— 阿爾貝提在 3/4 沒有意義，
    跟旋律齊奏在只有一隻手的時候也不成立。
    雙手的兩個方向都有伴奏那一隻手，所以 both 與 swap 都開放。 */
@@ -99,7 +109,10 @@ function refreshLhPatterns(){
     sel.appendChild(o);
   });
 
-  sel.disabled = (hands !== "both" && hands !== "swap");
+  // 只有一隻手的時候根本沒有伴奏聲部，這兩欄就沒有意義
+  const noAccomp = (hands !== "both" && hands !== "swap");
+  sel.disabled = noAccomp;
+  $("inv").disabled = noAccomp;
   sel.value = Array.from(sel.options).some(o => o.value === prev) ? prev : "";
 }
 
@@ -221,20 +234,27 @@ function drawOpts(){
   };
 }
 
+/* 譜面標題下面那一行。設定愈加愈多，全部列出來就變成一條讀不完的字串 ——
+   所以只列「這一題實際是什麼」，非預設的設定才額外標出來。 */
 function describe(ex){
-  const parts = [
-    LEVELS[ex.cfg.level - 1].n,
-    ex.key.displayName + "（" + ex.key.signatureLabel + "）",
-    ex.ts,
-    (HAND_MODES.find(h => h.id === ex.hands) || {}).label
-  ];
+  const hand = (HAND_MODES.find(h => h.id === ex.hands) || {}).short || "";
+  const opt = [];
   const dens = NOTE_DENSITY.find(d => d.id === ex.density);
-  if (dens && dens.id !== "auto") parts.push(dens.label);
+  if (dens && dens.id !== "auto") opt.push(dens.label.split(" · ")[0]);
   const foc = FOCUS.find(f => f.id === ex.focus);
-  if (foc && foc.id !== "none") parts.push("強化 " + foc.label);
-  if (ex.lhLabel) parts.push(ex.lhLabel);
-  parts.push(ex.roman.join(" │ "), CADENCE_ZH[ex.cadence] || ex.cadence, "#" + ex.seed.toString(36));
-  return parts.join(" · ");
+  if (foc && foc.id !== "none") opt.push("強化" + foc.label.split(" · ")[0]);
+  if (ex.inversion === "first")  opt.push("第一轉位");
+  if (ex.inversion === "second") opt.push("第二轉位");
+  if (ex.inversion === "mix")    opt.push("隨機轉位");
+  if (ex.inversion === "cycle")  opt.push("轉位輪替");
+
+  return [
+    ex.key.displayName + "（" + ex.key.signatureLabel + "）· " + ex.ts + " · 第 " + ex.cfg.level + " 級",
+    hand + (ex.lhLabel ? "・" + ex.lhLabel : ""),
+    opt.join("・"),
+    ex.roman.join(" │ ") + " · " + (CADENCE_ZH[ex.cadence] || ex.cadence),
+    "#" + ex.seed.toString(36)
+  ].filter(Boolean).join("  ·  ");
 }
 
 const CADENCE_ZH = {authentic:"正格終止", half:"半終止", deceptive:"假終止", plagal:"變格終止"};
@@ -658,6 +678,7 @@ function readCfg(){
     lhPattern: $("lhpat").value || null,
     density: $("dens").value,
     focus: $("focus").value,
+    inversion: $("inv").value,
     bars: parseInt($("bars").value, 10),
     step: state.step
   };
@@ -1006,7 +1027,7 @@ function bind(){
   // 出題設定變了，整條佇列都要重來（下一段是用舊設定生的）
   ["lv", "ts", "hands"].forEach(id =>
     $(id).addEventListener("change", () => { refreshLhPatterns(); generate({fresh:true}); }));
-  ["keysel", "bars", "lhpat", "dens", "focus"].forEach(id =>
+  ["keysel", "bars", "lhpat", "dens", "focus", "inv"].forEach(id =>
     $(id).addEventListener("change", () => generate({fresh:true})));
   // 換流程不必換題目 —— 只是重畫（反覆記號、預讀那一列）並歸零遍數
   $("flow").addEventListener("change", () => { syncFlow(); redraw(); });
@@ -1135,6 +1156,7 @@ async function boot(){
   fillHands();
   fillDensity();
   fillFocus();
+  fillInversions();
   fillKeySelect();
   refreshLhPatterns();
   fillProgressions();

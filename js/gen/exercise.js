@@ -6,7 +6,7 @@ import { Key, MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, keysWithin, cycleOfFourths } fro
 import { tsInfo, NOTE_DENSITY, densityMode } from "./rhythm.js";
 import { buildHarmony, cadenceKind } from "./harmony.js";
 import { melodyLine, scalePool, degreeMap, FOCUS, focusMode } from "./melody.js";
-import { bassLine, availablePatterns, LH_PATTERNS } from "./bass.js";
+import { bassLine, availablePatterns, LH_PATTERNS, INVERSIONS, inversionMode } from "./bass.js";
 
 /* 難度不再綁死調名清單，改成「調號數上限」——
    所以每個難度都自然涵蓋到該範圍內的全部調，含小調。 */
@@ -94,6 +94,7 @@ export function generateExercise(cfg){
   const hands = cfg.hands || "both";
   const density = densityMode(cfg.density).id;
   const focus = focusMode(cfg.focus).id;
+  const inversion = inversionMode(cfg.inversion);
   const clef = (HAND_MODES.find(h => h.id === hands) || HAND_MODES[0]).clef;
 
   const H = buildHarmony(rng.fork("harmony"), key, barCount,
@@ -107,8 +108,8 @@ export function generateExercise(cfg){
   const out = {
     seed,
     cfg: {level, keyPool: cfg.keyPool, ts, hands, bars: barCount, step: cfg.step || 0,
-          lhPattern: cfg.lhPattern || null, density, focus},
-    key, ts, clef, hands, beats, density, focus,
+          lhPattern: cfg.lhPattern || null, density, focus, inversion},
+    key, ts, clef, hands, beats, density, focus, inversion,
     harmony: H,
     roman: H.roman,
     measures: [],
@@ -154,7 +155,7 @@ export function generateExercise(cfg){
      伴奏跟著換到右手的音域，所以兩手各自都待在該待的位置，不會擠在一起。 */
   if (hands === "swap"){
     const rh = bassLine(rng.fork("lh"), inner, H, key, chordRange(range(spec, "treble")),
-                        mel.measures, cfg.lhPattern, {clef:"treble", dir:+1});
+                        mel.measures, cfg.lhPattern, {clef:"treble", dir:+1, inversion});
     out.lhLabel = "右手" + rh.label;
     out.lhPattern = rh.pattern;
     out.melodyOn = "bottom";
@@ -164,11 +165,11 @@ export function generateExercise(cfg){
 
   // 雙手：右手旋律 + 左手伴奏
   const lh = bassLine(rng.fork("lh"), inner, H, key, range(spec, "bass"), mel.measures,
-                      cfg.lhPattern, {clef:"bass", dir:-1});
+                      cfg.lhPattern, {clef:"bass", dir:-1, inversion});
   out.lhLabel = "左手" + lh.label;
   out.lhPattern = lh.pattern;
   for (let i = 0; i < barCount; i++) out.measures.push({top: mel.measures[i], bottom: lh.measures[i]});
   return out;
 }
 
-export { availablePatterns, LH_PATTERNS, NOTE_DENSITY, FOCUS };
+export { availablePatterns, LH_PATTERNS, NOTE_DENSITY, FOCUS, INVERSIONS };

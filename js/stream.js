@@ -8,6 +8,7 @@
  */
 
 import { generateExercise } from "./gen/exercise.js";
+import { randomSeed } from "./core/rng.js";
 
 export class Stream {
   /**
@@ -32,7 +33,19 @@ export class Stream {
       // 上一段停在半終止或假終止 → 這一段一定要從主和弦解決回來
       cfg.mustResolve = (prev.cadence === "half" || prev.cadence === "deceptive");
     }
-    const ex = generateExercise(cfg);
+    let ex = generateExercise(cfg);
+
+    /* 連著好幾段同樣的和聲進行，聽起來就是一直在重複 —— 每一段各自隨機是不夠的。
+       做法是「換一顆 seed 重生」而不是在產生器裡重抽：
+       usedCfg 裡就仍然只有一顆 seed，回顧與列印才重現得出一模一樣的譜。 */
+    if (seed === undefined){
+      const recent = this.recentProgressions();
+      for (let t = 0; t < 6 && recent.indexOf(ex.harmony.tokens.join(" ")) >= 0; t++){
+        cfg.seed = randomSeed();
+        ex = generateExercise(cfg);
+      }
+    }
+
     ex.lastNote = lastSoundingNote(ex);
     // 把真正用過的設定原封不動留著。重現一段練習光有 seed 不夠 ——
     // 五度圈進度、承接上一段的起始音都是輸入的一部分。
@@ -56,6 +69,14 @@ export class Stream {
     const prev = this.queue[this.queue.length - 1];
     if (this.cycleMode()) this.step++;
     this.queue.push(this._make(prev, undefined));
+  }
+
+  /* 佇列裡與剛練過的那幾段用了哪些進行 */
+  recentProgressions(){
+    const out = [];
+    this.queue.forEach(ex => { if (ex && ex.harmony) out.push(ex.harmony.tokens.join(" ")); });
+    this.history.slice(-2).forEach(h => { if (h.tokens) out.push(h.tokens); });
+    return out;
   }
 
   cycleMode(){
@@ -125,6 +146,7 @@ export class Stream {
     this.history.push({
       cfg: ex.usedCfg,
       key: ex.key.displayName,
+      tokens: ex.harmony ? ex.harmony.tokens.join(" ") : "",
       roman: ex.roman.join(" │ "),
       cadence: ex.cadence,
       seed: ex.seed,

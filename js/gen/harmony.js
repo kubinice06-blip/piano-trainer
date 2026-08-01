@@ -50,6 +50,19 @@ function sameHarmony(a, b){
 
 const VOCAB = {major: buildVocab("major"), minor: buildVocab("minor")};
 
+/* ---------- 取樣溫度 ----------
+ *
+ * 語料庫的出現次數是冪次分布：I>IV 之類的常見接續比冷門的多好幾個數量級。
+ * 直接拿次數當權重，抽出來的東西就塌成前三名 ——
+ * 實測第 1、2 級 400 題只出得到 7 種進行，I–IV–V–I 一個就佔一半，
+ * 也就是「都可以猜到是 C F G C」的來源。
+ *
+ * 開根號把分布壓平。真實常見的接續還是比較常出現，但不再壟斷；
+ * 而且路徑本來就只走語料庫真的存在的邊，壓平不會生出不存在的接續。
+ */
+const TEMP = 0.42;
+function flat(w){ return Math.pow(Math.max(w, 0), TEMP); }
+
 /* ---------- 轉移機率 ---------- */
 
 function edges(mode, vocabSet){
@@ -121,14 +134,14 @@ function walk(rng, mode, n, suffix, vocabSet, edgeMap, startFilter){
   }
   const named = pool.filter(t => starts[t]);
   if (named.length) pool = named;
-  const path = [rng.weighted(pool, pool.map(t => (starts[t] || 1) * (/^(I|i)$/.test(t) ? 4 : 1)))];
+  const path = [rng.weighted(pool, pool.map(t => flat(starts[t] || 1) * (/^(I|i)$/.test(t) ? 2 : 1)))];
 
   for (let k = 1; k < free; k++){
     const prev = path[k - 1], prev2 = path[k - 2];
     const next = (edgeMap[prev] || []).filter(e => R[k].has(e.to));
     if (!next.length) return null;
     // 三連統計優先：同樣的 A>B 之後，語料庫裡最常接什麼
-    const ws = next.map(e => e.w + (prev2 ? triWeight(mode, prev2, prev, e.to) * 6 : 0));
+    const ws = next.map(e => flat(e.w) + (prev2 ? flat(triWeight(mode, prev2, prev, e.to)) * 2.5 : 0));
     path.push(rng.weighted(next, ws).to);
   }
   return path.concat(suffix);
@@ -149,13 +162,21 @@ function phrasePlan(rng, bars){
   return out;
 }
 
-/* 和聲節奏：每小節幾個和弦。低難度一小節一個，高難度偶爾兩個，終止小節不切碎。 */
+/* 和聲節奏：每小節幾個和弦。終止小節不切碎。
+ *
+ * 一小節兩個和弦是變化量最便宜的來源，而且低難度也需要 ——
+ * 四小節、一小節一個和弦、頭尾又被「從主和弦出發」和終止式各佔掉，
+ * 中間就只剩一個位置可以變，所以第 1、2 級不管怎麼抽都只有 7 種進行。
+ * 現在每一級都有機會切成兩個，愈高愈常切。
+ */
+const SPLIT_CHANCE = [0.14, 0.18, 0.22, 0.26, 0.32, 0.34];
+
 function harmonicRhythm(rng, bars, level, beats){
+  const p = SPLIT_CHANCE[Math.min(Math.max(level, 1), 6) - 1];
   const out = [];
   for (let i = 0; i < bars; i++){
     const last = (i === bars - 1);
-    const two = !last && level >= 4 && beats >= 4 && rng.chance(level >= 5 ? 0.30 : 0.18);
-    out.push(two ? 2 : 1);
+    out.push(!last && beats >= 3 && rng.chance(p) ? 2 : 1);
   }
   return out;
 }
@@ -193,7 +214,7 @@ export function buildHarmony(rng, key, barCount, opts){
       const opts2 = cadenceOptions(mode, kind, vocabSet);
       if (!opts2.length) continue;
       for (let tryN = 0; tryN < 8 && !seq; tryN++){
-        const cad = rng.weighted(opts2, opts2.map(c => c.w));
+        const cad = rng.weighted(opts2, opts2.map(c => flat(c.w)));
         seq = walk(rng, mode, slots, cad.pair, vocabSet, edgeMap, startFilter);
       }
       if (seq){ if (ph === plan[plan.length - 1]) usedCadence = kind; break; }

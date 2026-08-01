@@ -232,8 +232,10 @@ function rowMaxHeight(){
   const h = $("stage").clientHeight;
   if (!h) return 0;
   const rows = (state.mode === "read" && $("flow").value === "flow") ? 2 : 1;
-  // 每一列有 14px 的列標籤；第二列還多 10px 列間距 + 1px 分隔線 + 8px 內距
-  const chrome = rows * 14 + (rows - 1) * 19;
+  // 每一列有 14px 的列標籤；第二列還多「列間距 + 1px 分隔線 + 8px 內距」。
+  // 列間距在矮螢幕會被改小，所以是量出來的而不是寫死的
+  const gap = parseFloat(getComputedStyle($("stage")).rowGap) || 10;
+  const chrome = rows * 14 + (rows - 1) * (gap + 9);
   return Math.max(140, (h - chrome) / rows);
 }
 
@@ -365,6 +367,16 @@ function renderChord(){
 /* ---------- 本次練習的段落存檔 ---------- */
 
 const CAD_SHORT = {authentic:"正格", half:"半終止", deceptive:"假終止", plagal:"變格"};
+
+/* 存檔籤展開／收合。矮螢幕（橫放的 iPad）預設收起來 ——
+   那 90px 拿去給五線譜比較值得，要看的時候點一下就開。 */
+function toggleReviewList(open){
+  const box = $("review");
+  const on = (open === undefined) ? box.classList.contains("collapsed") : open;
+  box.classList.toggle("collapsed", !on);
+  $("revtoggle").setAttribute("aria-expanded", on ? "true" : "false");
+  redraw();                 // 高度變了，譜要重新算能用多高
+}
 
 function renderReview(){
   const box = $("review");
@@ -1124,6 +1136,7 @@ function bind(){
     }
   });
 
+  $("revtoggle").addEventListener("click", () => toggleReviewList());
   $("revback").addEventListener("click", exitReview);
   $("markbad").addEventListener("click", toggleMark);
   $("printsheet").addEventListener("click", printSheet);
@@ -1196,6 +1209,11 @@ async function boot(){
   bind();
   syncFlow();
   syncSwapButton();
+  // 矮螢幕預設收起存檔籤（不呼叫 toggleReviewList，此時還沒有譜可以重畫）
+  if (window.innerHeight < 860){
+    $("review").classList.add("collapsed");
+    $("revtoggle").setAttribute("aria-expanded", "false");
+  }
   installAudioUnlock();
   installGestures();
   registerServiceWorker();

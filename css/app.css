@@ -302,11 +302,26 @@ input[type="range"]{
 .answerbox .dim{color:#8B846C;}
 
 /* ---------- 本次練習的段落存檔 ---------- */
-/* 存檔籤固定在譜面下方，不跟譜面搶高度；多到放不下就自己捲 */
+/* 存檔籤固定在譜面下方，不跟譜面搶高度；多到放不下就自己捲。
+   收合起來只剩一條標題列 —— 橫放的 iPad 高度很緊，那 90px 拿去給五線譜比較值得。 */
 .review{
   margin-top:12px;border-top:1px solid rgba(200,145,47,.25);padding-top:10px;
   flex:0 0 auto;max-height:22vh;overflow-y:auto;
 }
+.review.collapsed{max-height:none;overflow:visible;}
+.review.collapsed .review-list{display:none;}
+.review.collapsed .review-head{margin-bottom:0;}
+.rev-toggle{
+  appearance:none;background:none;border:0;padding:0;cursor:pointer;
+  display:flex;align-items:center;gap:6px;
+  font-family:inherit;font-size:inherit;letter-spacing:inherit;text-transform:inherit;
+  color:inherit;
+}
+.rev-toggle .chev{
+  width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;
+  border-top:5px solid currentColor;transition:transform .15s;
+}
+.review.collapsed .rev-toggle .chev{transform:rotate(-90deg);}
 .review-head{
   display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
   font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;
@@ -441,6 +456,20 @@ details.recipe td:first-child{font-family:var(--mono);color:var(--brass);white-s
 }
 @media (max-width:620px){
   .tb-read{display:none;}
+}
+
+/* 矮螢幕（橫放的 iPad 大約只有 740px 高）：外框的留白全部收緊，
+   把省下來的高度讓給五線譜。連續流要同時擺兩段大譜表 ——
+   每少 50px 外框，譜就少縮 10%，而使用者要的是原本的大小。 */
+@media (max-height:860px){
+  .desk{
+    padding-top:calc(var(--topbar) + var(--safe-t) + 8px);
+    padding-bottom:calc(8px + var(--safe-b));
+  }
+  .paper{padding:14px 22px 16px;}
+  .paper .head{padding-bottom:6px;margin-bottom:10px;}
+  .review{margin-top:8px;padding-top:8px;}
+  .stage{gap:6px;}
 }
 
 @media (prefers-reduced-motion: reduce){

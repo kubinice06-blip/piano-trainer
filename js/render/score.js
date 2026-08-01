@@ -75,8 +75,9 @@ function maxPerLine(W, grand){
 }
 
 /* 縮到這個比例以下就不再縮了 —— 再小就看不清楚，
-   那還不如讓譜面區自己捲（頁面仍然不捲，頂欄的開始／停止照樣按得到）。 */
-var MIN_FIT = 0.7;
+   那還不如讓譜面區自己捲（頁面仍然不捲，頂欄的開始／停止照樣按得到）。
+   0.85 是「幾乎看不出來變小」的界線；再往下使用者就會覺得譜變小了。 */
+var MIN_FIT = 0.85;
 
 function svgText(svg, x, y, cls, str){
   var t = document.createElementNS("http://www.w3.org/2000/svg", "text");

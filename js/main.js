@@ -224,12 +224,26 @@ function setBpm(v){
 
 function isLoop(){ return state.mode === "read" && $("flow").value === "loop"; }
 
+/* 一列譜可以用多高。頁面本身不捲，所以這是硬上限 ——
+   連續流要同時擺兩段，每一段就只有一半的高度。
+   放大超過 100% 時使用者是刻意要看大的，這時不設限，改由譜面區自己捲。 */
+function rowMaxHeight(){
+  if (document.body.classList.contains("zoomed")) return 0;
+  const h = $("stage").clientHeight;
+  if (!h) return 0;
+  const rows = (state.mode === "read" && $("flow").value === "flow") ? 2 : 1;
+  // 每一列有 14px 的列標籤；第二列還多 10px 列間距 + 1px 分隔線 + 8px 內距
+  const chrome = rows * 14 + (rows - 1) * 19;
+  return Math.max(140, (h - chrome) / rows);
+}
+
 function drawOpts(){
   return {
     showNames: $("shownames").checked,
     showHarmony: $("showharm").checked,
     showChords: $("showchords").checked,
     repeat: isLoop(),
+    maxHeight: rowMaxHeight(),
     zoom: parseInt($("zoom").value, 10) / 100
   };
 }
@@ -285,11 +299,13 @@ function syncRows(){
 function renderRead(){
   const st = state.stream;
   const cur = st.current();
+  // 一定要先把版面定好再畫：還掛著 is-hidden 的那一列量到的寬度是 0，
+  // 繪圖端就會退回寫死的 900px，畫出來的譜跟容器對不起來
+  syncRows();
   state.plan = paintRow(state.nowRow, cur, "現在");
   if ($("flow").value === "flow" && st.next()){
     paintRow(1 - state.nowRow, st.next(), "下一段 · 眼睛先跑到這裡");
   }
-  syncRows();
   $("sheetTitle").textContent = "視譜練習";
   $("sheetSub").textContent = describe(cur);
   $("answer").hidden = true;
@@ -306,8 +322,8 @@ function advanceSegment(barsDone){
     state.nowRow = 1 - state.nowRow;
     state.rows[state.nowRow].querySelector(".rowtag").textContent = "現在";
     state.plan = state.plans[state.nowRow];          // 它畫好的時候就存起來了
+    syncRows();                                      // 同樣先定版面再畫
     paintRow(1 - state.nowRow, st.next(), "下一段 · 眼睛先跑到這裡");
-    syncRows();
     $("sheetSub").textContent = describe(st.current());
     renderReview();
   } else {
@@ -888,6 +904,16 @@ Metro.onBar = (barsDone) => {
   startPlayAlong();          // 新的一段接著播，中間不斷
 };
 
+/* 頂欄那顆與右下角浮動那顆是同一個狀態的兩個出口，一起更新 */
+function setMetroLabel(on){
+  $("metro").setAttribute("aria-pressed", on ? "true" : "false");
+  $("metro").textContent = on ? "停止" : "開始";
+  const f = $("fabmetro");
+  f.setAttribute("aria-pressed", on ? "true" : "false");
+  f.setAttribute("aria-label", on ? "停止節拍器" : "開始節拍器");
+  f.textContent = on ? "■" : "▶";
+}
+
 function toggleMetro(){
   if (Metro.on){
     Metro.stop();
@@ -899,8 +925,7 @@ function toggleMetro(){
       state.practiceStart = 0;
       renderLibrary();
     }
-    $("metro").setAttribute("aria-pressed", "false");
-    $("metro").textContent = "開始";
+    setMetroLabel(false);
     $("clipmeta").textContent = "停止";
     const cells = $("beatstrip").children;
     for (let k = 0; k < cells.length; k++) cells[k].classList.remove("on");
@@ -918,8 +943,7 @@ function toggleMetro(){
     return;
   }
   startCursor();
-  $("metro").setAttribute("aria-pressed", "true");
-  $("metro").textContent = "停止";
+  setMetroLabel(true);
   $("clipmeta").textContent = "預備";
   Wake.request();
   state.practiceStart = Date.now();
@@ -1009,6 +1033,8 @@ function bind(){
 
   $("zoom").addEventListener("input", function(){
     $("zoomread").textContent = this.value + "%";
+    // 放大超過 100% 就改成譜面區自己捲（頁面仍然不捲）
+    document.body.classList.toggle("zoomed", parseInt(this.value, 10) > 100);
     redraw();
   });
   $("keepawake").addEventListener("change", function(){
@@ -1021,6 +1047,8 @@ function bind(){
   $("print").addEventListener("click", () => window.print());
   $("play").addEventListener("click", togglePlay);
   $("metro").addEventListener("click", toggleMetro);
+  $("fabmetro").addEventListener("click", toggleMetro);
+  $("fabgen").addEventListener("click", () => generate());
 
   $("swaphands").addEventListener("click", swapHands);
 

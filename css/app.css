@@ -100,14 +100,25 @@ body.drawer-open .rail{transform:none;}
 }
 body.drawer-open .scrim{opacity:1;pointer-events:auto;}
 
+/* 譜架不該捲動。
+ *
+ * 頁面一旦會捲，iPad 上要按頂欄的「開始／停止」就得先捲回去 ——
+ * 而且 iOS 的瀏覽器工具列會在捲動時收合，position:fixed 的頂欄跟著晃。
+ * 所以整個桌面就固定一個視窗高，譜面自己縮到放得下（見 .row .score svg），
+ * 真的放不下時捲動也發生在譜面區內部，頁面本身永遠不動。
+ * 100dvh 是給 iOS 用的：100vh 會把工具列的高度也算進去，底部會被吃掉。
+ */
 .desk{
-  padding:calc(var(--topbar) + var(--safe-t) + 16px) calc(16px + var(--safe-r))
-          calc(48px + var(--safe-b)) calc(16px + var(--safe-l));
+  padding:calc(var(--topbar) + var(--safe-t) + 12px) calc(16px + var(--safe-r))
+          calc(12px + var(--safe-b)) calc(16px + var(--safe-l));
   min-width:0;
   background:
     radial-gradient(120% 80% at 50% -10%, rgba(200,145,47,.09), transparent 60%),
     var(--ink);
-  min-height:100vh;
+  height:100vh;
+  height:100dvh;
+  overflow:hidden;
+  display:flex;
 }
 
 /* 有滑鼠的寬螢幕才把抽屜釘住。
@@ -185,8 +196,39 @@ input[type="range"]{
 .btnrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(0,1fr));gap:9px;margin-top:12px;}
 .btn-wide{width:100%;margin-bottom:11px;}
 
+/* ---------- 浮動控制（觸控裝置）----------
+   在譜架上彈琴時，手在鍵盤上，要伸到螢幕最上緣按「開始」很不順。
+   所以觸控裝置在右下角再給一組大按鈕，跟頂欄那兩顆連動。
+   有滑鼠的桌機不需要，直接不顯示。 */
+.fab{display:none;}
+@media (pointer:coarse){
+  .fab{
+    display:flex;flex-direction:column;gap:10px;
+    position:fixed;z-index:46;
+    right:calc(16px + var(--safe-r));
+    bottom:calc(16px + var(--safe-b));
+  }
+  body.drawer-open .fab{display:none;}
+}
+.fab-btn{
+  appearance:none;cursor:pointer;
+  width:58px;height:58px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;line-height:1;
+  box-shadow:0 6px 18px rgba(0,0,0,.45);
+  transition:background .16s,color .16s,transform .1s;
+}
+.fab-btn:active{transform:scale(.94);}
+.fab-metro{background:var(--brass);color:#12232A;border:1px solid var(--brass);font-weight:700;}
+.fab-metro[aria-pressed="true"]{background:var(--ember);border-color:var(--ember);color:#F6F1E4;}
+.fab-gen{
+  background:rgba(18,35,42,.9);color:var(--bone);
+  border:1px solid rgba(220,212,192,.35);
+  width:46px;height:46px;font-size:19px;align-self:flex-end;
+}
+
 /* ---------- 譜面 ---------- */
-.sheetwrap{max-width:1180px;margin:0 auto;}
+.sheetwrap{max-width:1180px;margin:0 auto;flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;}
 
 /* 拍點條 —— 招牌元素 */
 .beatstrip{display:flex;gap:4px;flex:1 1 140px;min-width:90px;max-width:420px;height:24px;align-items:stretch;}
@@ -211,7 +253,7 @@ input[type="range"]{
   padding:26px 22px 30px;
   box-shadow:0 18px 44px rgba(0,0,0,.42), 0 2px 0 var(--paper-edge);
   color:#14262D;
-  min-height:300px;
+  flex:1;min-height:0;display:flex;flex-direction:column;
 }
 .paper .head{
   display:flex;justify-content:space-between;align-items:baseline;gap:16px;
@@ -219,9 +261,12 @@ input[type="range"]{
 }
 .paper .title{font-family:var(--mono);font-size:13px;letter-spacing:.2em;text-transform:uppercase;color:#14262D;font-weight:700;}
 .paper .sub{font-family:var(--mono);font-size:11.5px;color:#6B6551;letter-spacing:.08em;}
-/* ---------- 舞台：現在這一段 + 已經畫好的下一段 ---------- */
-.stage{display:flex;flex-direction:column;gap:10px;}
-.row{position:relative;order:2;}
+/* ---------- 舞台：現在這一段 + 已經畫好的下一段 ----------
+   高度是由 score.js 依 maxHeight 算好才畫的，所以正常情況剛好放得下。
+   縮到 70% 還是放不下時（螢幕太矮 + 小節太多），改由這裡捲 ——
+   捲的是譜面區，頁面本身不動，頂欄的開始／停止永遠按得到。 */
+.stage{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;overflow-y:auto;}
+.row{position:relative;order:2;flex:0 0 auto;}
 .row.is-now{order:1;}
 .row.is-next{order:2;opacity:.40;}
 .row.is-hidden{display:none;}
@@ -257,7 +302,11 @@ input[type="range"]{
 .answerbox .dim{color:#8B846C;}
 
 /* ---------- 本次練習的段落存檔 ---------- */
-.review{margin-top:16px;border-top:1px solid rgba(200,145,47,.25);padding-top:12px;}
+/* 存檔籤固定在譜面下方，不跟譜面搶高度；多到放不下就自己捲 */
+.review{
+  margin-top:12px;border-top:1px solid rgba(200,145,47,.25);padding-top:10px;
+  flex:0 0 auto;max-height:22vh;overflow-y:auto;
+}
 .review-head{
   display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
   font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;
@@ -400,9 +449,14 @@ details.recipe td:first-child{font-family:var(--mono);color:var(--brass);white-s
 @media print{
   @page{margin:0;}
   body{background:#fff;color:#000;}
-  .topbar,.rail,.scrim,.review,.railhint,.cursor{display:none !important;}
-  .desk{padding:0;background:#fff;min-height:0;}
+  .topbar,.rail,.scrim,.review,.railhint,.cursor,.fab{display:none !important;}
+  /* 列印時把「固定一個視窗高」整組解掉，否則第二行會被裁掉 */
+  .desk{padding:0;background:#fff;height:auto;overflow:visible;display:block;}
+  .sheetwrap,.paper,.stage{display:block;min-height:0;height:auto;overflow:visible;}
   .paper{box-shadow:none;background:#fff;border-radius:0;}
+  .row{display:block;flex:none;}
+  .row .score{overflow:visible;}
+  .row .score svg{max-height:none;width:100%;height:auto;}
   .row.is-next{opacity:1;}
   .row.is-hidden{display:none;}
 

@@ -68,6 +68,16 @@ function measuresPerLine(W, grand){
   return 4;
 }
 
+/* 一行最多還能塞幾小節而不至於擠成一團。
+   高度不夠時會拿這個上限去換行數（行數少 = 整張矮），但不能無上限地塞。 */
+function maxPerLine(W, grand){
+  return Math.max(1, Math.floor((W - 90) / (grand ? 150 : 110)));
+}
+
+/* 縮到這個比例以下就不再縮了 —— 再小就看不清楚，
+   那還不如讓譜面區自己捲（頁面仍然不捲，頂欄的開始／停止照樣按得到）。 */
+var MIN_FIT = 0.7;
+
 function svgText(svg, x, y, cls, str){
   var t = document.createElementNS("http://www.w3.org/2000/svg", "text");
   t.setAttribute("x", x); t.setAttribute("y", y);
@@ -128,6 +138,24 @@ export function drawExercise(el, ex, opts){
   var perLine = o.perLine || measuresPerLine(W, grand);
   var lines = Math.ceil(ex.measures.length / perLine);
   var lineH = grand ? 190 : 120;
+  var extra = 60 + (o.showChords ? 16 : 0);
+
+  /* 譜架模式：這一列只有這麼高，放不下就要處理，因為頁面本身不捲。
+     先試「一行多塞幾小節」—— 行數變少，譜還是原來的大小，這比縮小划算；
+     真的還是放不下才整張縮。縮的是 zoom，所以 SVG 的外框跟內容一起變，
+     游標的換算（用 plan.lw）才不會跑掉。 */
+  if (o.maxHeight > 0 && !o.perLine){
+    var cap = Math.min(ex.measures.length, maxPerLine(W, grand));
+    while ((lines * lineH + extra) * zoom > o.maxHeight && perLine < cap){
+      perLine = Math.min(cap, perLine * 2);
+      lines = Math.ceil(ex.measures.length / perLine);
+    }
+    var need = (lines * lineH + extra) * zoom;
+    if (need > o.maxHeight){
+      zoom *= Math.max(MIN_FIT, o.maxHeight / need);
+      W = px / zoom;
+    }
+  }
   var H = lines * lineH + 60;
 
   var renderer = new VF.Renderer(el, VF.Renderer.Backends.SVG);
@@ -135,6 +163,9 @@ export function drawExercise(el, ex, opts){
   var ctx = renderer.getContext();
   if (zoom !== 1) ctx.scale(zoom, zoom);
   var svg = el.querySelector("svg");
+  // 保險：萬一 CSS 的 max-height 還是夾到了，讓內容靠左上而不是置中，
+  // 這樣游標的 x 位移仍然是對的（只是整體會小一點）
+  if (svg) svg.setAttribute("preserveAspectRatio", "xMinYMin meet");
   plan.lw = W;             // 游標換算座標要用邏輯寬度，不是 SVG 的 width 屬性
 
   var vexSig = ex.key.vexSignature;

@@ -12,8 +12,18 @@ import { MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, cycleOfFourths } from "./core/key.js"
 import { Stream } from "./stream.js";
 import { Library } from "./library.js";
 import { generateExercise } from "./gen/exercise.js";
+import { AXES, AXIS_INFO, EYE_HAND_BEATS, presetVector, normaliseVector,
+         axisValueLabel, generatorLevels } from "./adaptive.js";
+import { fingerprintExercise, cfgFromFingerprint } from "./fingerprint.js";
+import { noteName, midiOf } from "./core/pitch.js";
+import { MidiInput } from "./input/midi.js";
+import { OnsetInput } from "./input/onset.js";
+import { PerformanceMatcher } from "./input/performance.js";
 
 const $ = (id) => document.getElementById(id);
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+  "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;",
+})[char]);
 
 const state = {
   mode: "read",
@@ -32,8 +42,24 @@ const state = {
   libId: null,         // 目前這一段在長期紀錄裡的 id
   practiceStart: 0,    // 這一輪節拍器開始的時間，用來累計練習時數
   playAlongCycle: 0,   // 和弦模式跟播到第幾輪
-  loopCount: 0         // 重複同一段時已經彈完第幾遍
+  loopCount: 0,        // 重複同一段時已經彈完第幾遍
+  pendingRatingId: null,
+  exerciseOverride: null,
+  activeWeaknessId: null,
+  flashTimer: null,
+  matcher: null,
+  inputMode: null,
+  micro: {
+    open:false, kind:"note", item:null, startedAt:0, attempts:0, correct:0, lessonOwned:false,
+    endsAt:0, timer:null, roundTimer:null, rhythmMatcher:null,
+  },
+  lesson: null,
+  weekly: null,
 };
+
+state.midi = new MidiInput((note, at, type) => type === "off"
+  ? state.matcher?.noteOff(note, at) : state.matcher?.hit(note, at));
+state.onset = new OnsetInput((at) => state.matcher?.hit(null, at));
 
 /* ---------- 選單填充 ---------- */
 
@@ -206,6 +232,45 @@ function highlight(gid){
   if (el){ el.classList.add("vf-hl"); state.hlEl = el; }
 }
 
+function clearEyeMasks(){
+  clearTimeout(state.flashTimer);
+  state.flashTimer = null;
+  $("stage").querySelectorAll(".vf-eye-masked").forEach((element) => element.classList.remove("vf-eye-masked"));
+}
+
+function maskPlanEvents(plan, predicate){
+  for (const event of plan?.events || []){
+    if (!event.gid) continue;
+    const element = document.getElementById(event.gid);
+    if (element) element.classList.toggle("vf-eye-masked", !!predicate(event));
+  }
+}
+
+function setupEyeMask(){
+  clearEyeMasks();
+  if (state.mode !== "read") return;
+  const mode = $("maskmode").value;
+  if (mode === "flash"){
+    const seconds = Math.max(1, Number($("scansecs").value) || 3);
+    $("maskstatus").textContent = `先掃描 ${seconds} 秒，之後譜面隱藏`;
+    state.flashTimer = setTimeout(() => maskPlanEvents(state.plan, () => true), seconds * 1000);
+  } else if (mode === "follow") {
+    const lead = generatorLevels(currentVector()).maskLead ?? 0;
+    $("maskstatus").textContent = `移動遮罩：手前 ${lead} 拍內會被遮住`;
+  } else {
+    $("maskstatus").textContent = "眼手距離：關閉";
+  }
+}
+
+function updateEyeMask(position){
+  if (state.mode !== "read" || $("maskmode").value !== "follow" || !state.stream) return;
+  const ex = state.stream.current();
+  if (!ex) return;
+  const localBeat = position - state.stream.segStartBar * ex.beats;
+  const lead = generatorLevels(currentVector()).maskLead ?? 0;
+  maskPlanEvents(state.plan, (event) => event.t <= localBeat + lead + 1e-6);
+}
+
 function currentBpm(){
   return Math.max(30, Math.min(220, parseInt($("bpm").value, 10) || 60));
 }
@@ -313,6 +378,7 @@ function renderRead(){
   $("answer").hidden = true;
   buildBeatStrip(cur.beats);
   renderReview();
+  setupEyeMask();
 }
 
 /* 段落結束：下一列升上來（它已經畫好了），舊的那一列拿去畫新的下一段。
@@ -328,6 +394,7 @@ function advanceSegment(barsDone){
     paintRow(1 - state.nowRow, st.next(), "下一段 · 眼睛先跑到這裡");
     $("sheetSub").textContent = describe(st.current());
     renderReview();
+    setupEyeMask();
   } else {
     renderRead();
   }
@@ -494,7 +561,7 @@ function renderAudioStatus(){
 function logCurrent(){
   const ex = state.stream && state.stream.current();
   if (!ex) return;
-  const e = Library.log(ex);
+  const e = Library.present(ex);
   state.libId = e ? e.id : null;
   syncMarkButton();
   renderLibrary();
@@ -510,38 +577,99 @@ function syncMarkButton(){
 
 function toggleMark(){
   if (!state.libId) return;
-  Library.toggleMark(state.libId);
+  const marked = Library.toggleMark(state.libId);
+  if (marked && state.mode === "read" && state.stream?.current()){
+    Library.captureWeakness(fingerprintExercise(state.stream.current()), state.libId);
+  }
   syncMarkButton();
   renderLibrary();
+}
+
+function sparkline(values){
+  const numbers = values.filter((value) => value != null).map(Number).filter(Number.isFinite);
+  if (!numbers.length) return "";
+  const lo = Math.min(...numbers), hi = Math.max(...numbers);
+  const range = Math.max(0.001, hi - lo);
+  const points = values.map((value, index) => {
+    if (value == null || !Number.isFinite(Number(value))) return null;
+    const x = values.length === 1 ? 80 : index * 160 / (values.length - 1);
+    const y = 27 - (Number(value) - lo) / range * 22;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).filter(Boolean).join(" ");
+  return `<svg viewBox="0 0 160 32" aria-hidden="true"><polyline points="${points}"></polyline></svg>`;
 }
 
 function renderLibrary(){
   const s = Library.stats();
   const untouched = Library.untouched(ALL_KEYS);
+  const storageName = Library.backend === "indexeddb" ? "這台 iPad（IndexedDB）"
+    : (Library.backend === "localstorage" ? "這台裝置（相容儲存）" : "暫存記憶體");
 
   let html = '<div class="big">' +
-    '<div><b>' + s.segments + '</b><span>練過段數</span></div>' +
+    '<div><b>' + s.segments + '</b><span>完成段數</span></div>' +
+    '<div><b>' + s.attempts + '</b><span>實際嘗試</span></div>' +
     '<div><b>' + s.minutes + '</b><span>累計分鐘</span></div>' +
-    '<div><b>' + s.marked + '</b><span>待複習</span></div>' +
-    '<div><b>' + (30 - untouched.length) + '/30</b><span>碰過的調</span></div>' +
+    '<div><b>' + s.weaknessDue + '</b><span>到期弱點</span></div>' +
+    '<div><b>' + (30 - untouched.length) + '/30</b><span>完成過的調</span></div>' +
     "</div>";
+
+  html += '<div class="line">紀錄位置：<span class="ok">' + storageName + '</span></div>';
+  if (s.ratings){
+    html += '<div class="line">自評順暢率：<span class="ok">' +
+      Math.round(s.smoothRate * 100) + '%</span>（' + s.ratings + ' 段）</div>';
+  }
+  if (s.objectiveAccuracy != null){
+    html += '<div class="line">演奏偵測：<span class="ok">' +
+      Math.round(s.objectiveAccuracy * 100) + '% 音符命中</span>' +
+      (s.medianTimingMs == null ? '' : ' · 中位誤差 ' + Math.round(s.medianTimingMs) + 'ms') + '</div>';
+  }
+  if (s.latestWeekly){
+    html += '<div class="line">最近週測：<span class="ok">' + esc(s.latestWeekly.week || '本週') +
+      ' · ' + s.latestWeekly.completed + '/' + s.latestWeekly.segments + ' 段</span></div>';
+  }
 
   if (s.weak.length){
     html += '<div class="line">最常卡住：' +
-      s.weak.map(w => '<span class="tag">' + w.name + "</span>（" +
+      s.weak.map(w => '<span class="tag">' + esc(w.name) + "</span>（" +
                       Math.round(w.rate * 100) + "%）").join("、") + "</div>";
   }
   if (untouched.length){
     const show = untouched.slice(0, 6).map(k => k.shortName).join(" ");
-    html += '<div class="line">還沒碰過：<span class="ok">' + show +
+    html += '<div class="line">還沒完成過：<span class="ok">' + show +
             (untouched.length > 6 ? " …共 " + untouched.length + " 個" : "") + "</span></div>";
-  } else if (s.unique){
+  } else if (s.segments){
     html += '<div class="line"><span class="ok">30 個調都練過了。</span></div>';
   }
+  if (s.legacyEntries){
+    html += '<div class="line">已保留 ' + s.legacyEntries +
+      ' 筆舊紀錄；舊版只記得「出過題」，因此不灌入完成次數。</div>';
+  }
   if (!Library.available){
-    html += '<div class="line">這個瀏覽器不給用 localStorage，紀錄只會留在這次開啟期間。</div>';
+    html += '<div class="line">瀏覽器目前不允許永久儲存，紀錄只會留到這次關閉前；請先匯出備份。</div>';
   }
   $("stats").innerHTML = html;
+  $("practiceweak").disabled = s.weaknessActive === 0;
+  $("practiceweak").textContent = s.weaknessDue
+    ? `複習到期弱點 ${s.weaknessDue}` : (s.weaknessActive ? "尚未到期 · 可提前複習" : "尚無弱點指紋");
+  const maxHeat = Math.max(1, ...s.weaknessHeatmap.map((item) => item.count));
+  $("weakheat").innerHTML = s.weaknessHeatmap.map((item) =>
+    `<span class="cell" style="--heat:${(0.08 + item.count / maxHeat * 0.36).toFixed(2)}">${esc(item.label)} ×${item.count}</span>`
+  ).join("");
+  const weeks = s.weeklyHistory || [];
+  const latest = weeks[weeks.length - 1];
+  $("weeklytrend").innerHTML = weeks.length ? [
+    ["週測順暢", weeks.map((item) => item.smoothRate == null ? null : item.smoothRate * 5), latest?.smoothRate == null ? "—" : `${Math.round(latest.smoothRate * 5)}/5`],
+    ["眼手距離", weeks.map((item) => item.eyeHandBeats), latest?.eyeHandBeats == null ? "—" : `+${latest.eyeHandBeats}拍`],
+    ["音名中位", weeks.map((item) => item.noteMedianMs), latest?.noteMedianMs == null ? "—" : `${Math.round(latest.noteMedianMs)}ms`],
+  ].map(([label, values, value]) => `<div class="kpi-row"><span>${label}</span>${sparkline(values)}<strong>${value}</strong></div>`).join("") : "";
+
+  const notePositions = (s.notePositions || []).slice(0, 10);
+  $("noteheatlabel").hidden = notePositions.length === 0;
+  const slowest = Math.max(1, ...notePositions.map((item) => item.medianResponseMs || 0));
+  $("noteheat").innerHTML = notePositions.map((item) =>
+    `<span class="cell" style="--heat:${(0.08 + (item.medianResponseMs || 0) / slowest * 0.36).toFixed(2)}">` +
+    `${esc(item.position)} · ${Math.round(item.medianResponseMs || 0)}ms</span>`
+  ).join("");
 
   const list = Library.marked();
   $("markcount").textContent = String(list.length);
@@ -550,11 +678,192 @@ function renderLibrary(){
   list.forEach(e => {
     const b = document.createElement("button");
     b.className = "revchip";
-    b.innerHTML = '<span class="k">' + e.keyName + "</span> " +
-                  '<span class="n">lv' + e.level + "</span><br>" + e.roman;
+    b.innerHTML = '<span class="k">' + esc(e.keyName) + "</span> " +
+                  '<span class="n">lv' + esc(e.level) + "</span><br>" + esc(e.roman);
     b.addEventListener("click", () => openLibraryEntry(e));
     box.appendChild(b);
   });
+}
+
+async function connectMidi(){
+  const status = $("inputstatus");
+  try {
+    state.onset.disconnect();
+    const names = await state.midi.connect();
+    if (!names.length) throw new Error("沒有偵測到 MIDI 鍵盤，請接上後再試。");
+    state.inputMode = "midi";
+    status.textContent = `MIDI 已連接：${names.join("、")}。將比對音高與拍點。`;
+    $("connectmidi").setAttribute("aria-pressed", "true");
+    $("connectmic").setAttribute("aria-pressed", "false");
+  } catch (error) {
+    state.inputMode = null;
+    status.textContent = error?.name === "NotAllowedError" || /permission|not granted/i.test(error?.message || "")
+      ? "MIDI 權限未開啟；仍可使用「順／有絆／垮掉」自評。"
+      : (error?.message || "MIDI 連接失敗。");
+  }
+}
+
+async function connectMicrophone(){
+  const status = $("inputstatus");
+  try {
+    state.midi.disconnect();
+    await state.onset.connect();
+    state.inputMode = "onset";
+    status.textContent = "麥克風已啟用：只評估落鍵拍點，不宣稱辨識鋼琴和弦音高。";
+    $("connectmidi").setAttribute("aria-pressed", "false");
+    $("connectmic").setAttribute("aria-pressed", "true");
+  } catch (error) {
+    state.inputMode = null;
+    status.textContent = error?.name === "NotAllowedError" || /permission|not granted/i.test(error?.message || "")
+      ? "麥克風權限未開啟；請到 Safari 網站設定允許後再試。"
+      : (error?.message || "麥克風無法啟用；請檢查 Safari 麥克風權限。");
+  }
+}
+
+function currentVector(){
+  const value = {};
+  for (const axis of AXES){
+    const select = $("axis-" + axis);
+    value[axis] = select ? parseInt(select.value, 10) : 0;
+  }
+  return normaliseVector(value, parseInt($("lv").value, 10) || 1);
+}
+
+function fillAxisControls(){
+  const host = $("axiscontrols");
+  host.innerHTML = "";
+  for (const axis of AXES){
+    const wrap = document.createElement("label");
+    wrap.className = "axis-item";
+    wrap.textContent = AXIS_INFO[axis].label;
+    const select = document.createElement("select");
+    select.id = "axis-" + axis;
+    AXIS_INFO[axis].levels.forEach((label, value) => {
+      const option = document.createElement("option");
+      option.value = String(value);
+      option.textContent = (value + 1) + " · " + label;
+      select.appendChild(option);
+    });
+    select.addEventListener("change", () => {
+      applyVectorToUi(currentVector(), {persist:true, regenerate:true});
+    });
+    wrap.appendChild(select);
+    host.appendChild(wrap);
+  }
+}
+
+function syncAxisTarget(){
+  const adaptive = Library.data.adaptive || {};
+  const axis = adaptive.lastAxis;
+  $("axistarget").textContent = AXES.includes(axis)
+    ? "目前強化：" + AXIS_INFO[axis].label : "目前強化：—";
+}
+
+function applyVectorToUi(value, options = {}){
+  const vector = normaliseVector(value, parseInt($("lv").value, 10) || 1);
+  for (const axis of AXES){
+    const select = $("axis-" + axis);
+    if (select) select.value = String(vector[axis]);
+  }
+  const mapped = generatorLevels(vector);
+  $("lv").value = String(Math.max(mapped.rangeLevel, mapped.rhythmLevel, mapped.textureLevel));
+  if (Array.from($("dens").options).some((option) => option.value === mapped.density)) $("dens").value = mapped.density;
+  setBpm(mapped.bpm);
+
+  const textures = [
+    {hands:"rh", pattern:null}, {hands:"both", pattern:"sustain"},
+    {hands:"both", pattern:"block"}, {hands:"both", pattern:"arpeggio"},
+    {hands:"both", pattern:"parallel"}, {hands:"both", pattern:"contrary"},
+  ];
+  const texture = textures[vector.texture];
+  $("hands").value = texture.hands;
+  refreshLhPatterns();
+  if (texture.pattern && Array.from($("lhpat").options).some((option) => option.value === texture.pattern)) {
+    $("lhpat").value = texture.pattern;
+  }
+  const lead = EYE_HAND_BEATS[vector.eyeHand];
+  $("maskstatus").textContent = lead == null ? "眼手距離：關閉" : `眼手距離：${lead} 拍（遮罩迫使視線提前）`;
+  if (vector.eyeHand > 0 && $("maskmode").value === "off") $("maskmode").value = "follow";
+  if (vector.eyeHand === 0 && $("maskmode").value === "follow") $("maskmode").value = "off";
+  if (options.persist) Library.setAdaptive({vector});
+  syncAxisTarget();
+  if (options.regenerate && state.stream){
+    if (Metro.on) toggleMetro();
+    generate({fresh:true});
+  }
+  return vector;
+}
+
+async function exportLibrary(){
+  await Library.flush();
+  const blob = new Blob([Library.backup()], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const date = new Date().toLocaleDateString("sv-SE");
+  a.href = url;
+  a.download = "putai-practice-" + date + ".json";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function importLibrary(file){
+  if (!file) return;
+  if (!confirm("匯入會以備份檔取代這台 iPad 現有的練習紀錄。要繼續嗎？")) return;
+  try {
+    if (Metro.on) toggleMetro();
+    await Library.restore(await file.text());
+    state.libId = null;
+    state.pendingRatingId = null;
+    $("ratingbar").hidden = true;
+    applyStoredAdaptive();
+    renderLibrary();
+    syncMarkButton();
+    alert("練習紀錄已還原。");
+  } catch (error) {
+    alert(error?.message || "備份檔無法匯入。");
+  }
+}
+
+function applyStoredAdaptive(){
+  const adaptive = Library.data.adaptive || {};
+  $("adaptive").checked = adaptive.enabled !== false;
+  applyVectorToUi(adaptive.vector || presetVector(adaptive.level || 1));
+}
+
+function applyStaircase(result){
+  if (!result?.direction || !$("adaptive").checked || !result.axis) return null;
+  applyVectorToUi(result.vector);
+  const verb = result.direction === "up" ? "提高" : "降低";
+  return `${AXIS_INFO[result.axis].label}${verb}為 ${axisValueLabel(result.axis, result.vector[result.axis])}`;
+}
+
+function ratePending(rating, automatic){
+  if (!state.pendingRatingId) return null;
+  const id = state.pendingRatingId;
+  state.pendingRatingId = null;
+  $("ratingbar").hidden = true;
+  const result = Library.rateAttempt(id, rating);
+  if (!result) return null;
+  const adjustment = applyStaircase(result);
+  const labels = {smooth:"順", stumble:"有絆", collapse:"垮掉"};
+  if (!automatic){
+    $("clipmeta").textContent = "已記錄「" + labels[rating] + "」" + (adjustment ? " · " + adjustment : "");
+  }
+  if (result.attempt.weaknessId){
+    state.exerciseOverride = null;
+    state.activeWeaknessId = null;
+  }
+  weeklyAcceptAttempt(result.attempt);
+  renderLibrary();
+  return result;
+}
+
+function askForRating(attempt){
+  if (!attempt?.completed) return;
+  state.pendingRatingId = attempt.id;
+  $("ratingbar").hidden = false;
 }
 
 /* 從複習清單調閱一段。跟本次存檔的調閱走同一條路。 */
@@ -578,6 +887,465 @@ function openLibraryEntry(entry){
   setDrawer(false);
 }
 
+function practiceWeakness(id = null){
+  const weakness = id ? Library.weakness(id)
+    : (Library.dueWeaknesses()[0] || Library.activeWeaknesses()[0]);
+  if (!weakness) return false;
+  if (state.mode !== "read") setMode("read");
+  state.activeWeaknessId = weakness.id;
+  state.exerciseOverride = cfgFromFingerprint(weakness.fingerprint, readCfg());
+  // The preserved fingerprint determines musical features; the seed remains
+  // new, so this is transfer practice rather than memorising the old score.
+  delete state.exerciseOverride.seed;
+  $("flow").value = "manual";
+  syncFlow();
+  generate({fresh:true});
+  $("clipmeta").textContent = `弱點複習 · 第 ${weakness.stage + 1}/3 階段`;
+  setDrawer(false);
+  return true;
+}
+
+/* ---------- P9：90 秒微練習 ---------- */
+
+const MICRO_LEVEL_KEY = "putai.micro.level";
+
+function microLevel(){
+  return Math.max(1, Math.min(6, parseInt($("microlevel")?.value, 10) || 3));
+}
+
+function restoreMicroLevel(){
+  try { $("microlevel").value = String(Math.max(1, Math.min(6, Number(localStorage.getItem(MICRO_LEVEL_KEY)) || 3))); }
+  catch { $("microlevel").value = "3"; }
+}
+
+function melodyNotes(ex){
+  const side = ex.melodyOn === "bottom" ? "bottom" : "top";
+  return ex.measures.flatMap((measure) => measure[side] || measure.top || [])
+    .filter((item) => !item.rest && item.note);
+}
+
+function buildMicroItem(kind){
+  const level = microLevel();
+  const make = (density, keyPool = "level") => generateExercise({
+    ...readCfg(), bars:1, hands:"rh", lhPattern:null, keyPool,
+    level, difficulty:presetVector(level), density, focus:"none", seed:undefined,
+  });
+
+  if (kind === "note"){
+    const history = new Map(Library.notePositionStats().map((item) => [item.position, item]));
+    const candidates = [];
+    for (let tries = 0; tries < 12; tries++){
+      const ex = make("long");
+      const note = melodyNotes(ex)[0]?.note;
+      if (!note) continue;
+      const position = `${noteName(note)}${note.o}`;
+      const prior = history.get(position);
+      const weight = 1 + (prior ? (1 - (prior.accuracy ?? 1)) * 4 + (prior.medianResponseMs || 0) / 900 : 0);
+      candidates.push({ex, note, position, weight});
+    }
+    let pick = candidates[0], ticket = Math.random() * candidates.reduce((sum, item) => sum + item.weight, 0);
+    for (const candidate of candidates){ ticket -= candidate.weight; if (ticket <= 0){ pick = candidate; break; } }
+    if (!pick){
+      const ex = make("long"), note = melodyNotes(ex)[0]?.note || {l:0,a:0,o:4};
+      pick = {ex, note, position:`${noteName(note)}${note.o}`};
+    }
+    const answer = noteName(pick.note);
+    return {kind:"note", ex:pick.ex, position:pick.position, question:"這個音的音名是？", answer, choices:["C", "D", "E", "F", "G", "A", "B"]};
+  }
+
+  if (kind === "rhythm"){
+    const rhythmDensity = ["long", "quarter", "eighth", "varied", "16th", "16th"][level - 1];
+    const source = make(rhythmDensity, "C");
+    const ex = source;
+    for (const measure of ex.measures){
+      for (const side of ["top", "bottom"]){
+        for (const item of measure[side] || []) if (!item.rest) item.note = {l:6,a:0,o:4};
+      }
+    }
+    const bpm = generatorLevels(presetVector(level)).bpm;
+    return {kind:"rhythm", ex, bpm, question:`先聽一小節預備拍，再照譜拍節奏 · ♩=${bpm}`, choices:[]};
+  }
+
+  const allChoices = ["上行級進", "下行級進", "上行跳進", "下行跳進"];
+  const choices = level <= 2 ? allChoices.slice(0, 2) : allChoices;
+  const answer = choices[Math.floor(Math.random() * choices.length)];
+  const noteCount = level === 1 ? 2 : (level <= 3 ? 3 : 4);
+  const ex = make("quarter", "C"), notes = melodyNotes(ex).slice(0, noteCount);
+  const direction = answer.startsWith("上") ? 1 : -1;
+  const distance = answer.endsWith("級進") ? 1 : Math.min(4, 2 + Math.floor((level - 3) / 2));
+  const start = direction > 0 ? 28 : 35;
+  notes.forEach((item, index) => {
+    const value = start + direction * distance * index;
+    item.note = {l:((value % 7) + 7) % 7, a:0, o:Math.floor(value / 7)};
+  });
+  return {kind:"shape", ex, question:"把音讀成形狀：這段是？", answer, choices};
+}
+
+function renderMicro(){
+  const micro = state.micro;
+  clearTimeout(micro.roundTimer);
+  micro.roundTimer = null;
+  micro.rhythmMatcher = null;
+  micro.item = buildMicroItem(micro.kind);
+  micro.startedAt = performance.now();
+  $("microquestion").textContent = micro.item.question;
+  $("microfeedback").textContent = "";
+  $("microstats").textContent = `${micro.correct} / ${micro.attempts}`;
+  micro.item.plan = drawExercise($("microscore"), micro.item.ex, {
+    showNames:false, showHarmony:false, showChords:false, zoom:1.05, perLine:1, maxHeight:220,
+  });
+  const answers = $("microanswers");
+  answers.innerHTML = "";
+  if (micro.item.kind === "rhythm"){
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "rhythm-tap";
+    button.textContent = "開始節奏拍打";
+    button.addEventListener("click", startRhythmRound, {once:true});
+    answers.appendChild(button);
+    return;
+  }
+  micro.item.choices.forEach((choice) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = choice;
+    button.addEventListener("click", () => answerMicro(choice));
+    answers.appendChild(button);
+  });
+}
+
+function updateMicroTime(){
+  if (!state.micro.open) return;
+  const seconds = Math.max(0, Math.ceil((state.micro.endsAt - Date.now()) / 1000));
+  $("microtime").textContent = `${String(Math.floor(seconds / 60)).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
+  if (seconds <= 0 && !state.micro.lessonOwned) closeMicro(true);
+}
+
+function startMicroClock(seconds = 90){
+  clearInterval(state.micro.timer);
+  state.micro.endsAt = Date.now() + seconds * 1000;
+  updateMicroTime();
+  state.micro.timer = setInterval(updateMicroTime, 250);
+}
+
+function openMicro(kind = "note", lessonOwned = false){
+  if (Metro.on) toggleMetro();
+  state.micro.open = true;
+  state.micro.kind = kind;
+  state.micro.lessonOwned = lessonOwned;
+  state.micro.attempts = 0;
+  state.micro.correct = 0;
+  $("micropanel").hidden = false;
+  $("mode-micro").setAttribute("aria-pressed", "true");
+  $("micropanel").querySelectorAll("[data-kind]").forEach((button) =>
+    button.setAttribute("aria-pressed", button.dataset.kind === kind ? "true" : "false"));
+  renderMicro();
+  startMicroClock(lessonOwned ? (LESSON_PHASES[state.lesson?.phase]?.seconds || 90) : 90);
+}
+
+function closeMicro(force = false){
+  if (state.micro.lessonOwned && !force){ stopLesson(); return; }
+  state.micro.open = false;
+  state.micro.lessonOwned = false;
+  clearInterval(state.micro.timer);
+  clearTimeout(state.micro.roundTimer);
+  state.micro.timer = null;
+  state.micro.roundTimer = null;
+  state.micro.rhythmMatcher = null;
+  $("micropanel").hidden = true;
+  $("mode-micro").setAttribute("aria-pressed", "false");
+}
+
+function startRhythmRound(){
+  const micro = state.micro;
+  if (!micro.open || micro.kind !== "rhythm" || !micro.item?.plan) return;
+  if (!Metro.ensure()){
+    $("microfeedback").textContent = "點一下畫面啟用音訊後再試。";
+    return;
+  }
+  const bpm = micro.item.bpm || generatorLevels(presetVector(microLevel())).bpm;
+  const beats = micro.item.ex.beats || 4;
+  const secondsPerBeat = 60 / bpm;
+  const audioStart = Metro.ac.currentTime + 0.18;
+  for (let beat = 0; beat < beats * 2; beat++) Metro._click(audioStart + beat * secondsPerBeat, beat % beats === 0);
+  const performanceStart = performance.now() + (audioStart - Metro.ac.currentTime + beats * secondsPerBeat) * 1000;
+  micro.rhythmMatcher = new PerformanceMatcher(micro.item.plan, bpm, performanceStart, "onset");
+  const button = $("microanswers").querySelector("button");
+  button.textContent = "拍一下（空白鍵也可以）";
+  button.addEventListener("click", tapRhythm);
+  $("microfeedback").textContent = "預備拍…";
+  micro.roundTimer = setTimeout(finishRhythmRound, (beats * 2 * secondsPerBeat + 0.65) * 1000);
+}
+
+function tapRhythm(){
+  if (!state.micro.rhythmMatcher) return;
+  state.micro.rhythmMatcher.hit(null, performance.now());
+  $("microfeedback").textContent = "已拍 · 繼續";
+}
+
+function finishRhythmRound(){
+  const micro = state.micro;
+  if (!micro.rhythmMatcher) return;
+  const result = micro.rhythmMatcher.result();
+  micro.rhythmMatcher = null;
+  micro.attempts += 1;
+  const correct = result.rating !== "collapse";
+  if (correct) micro.correct += 1;
+  $("microstats").textContent = `${micro.correct} / ${micro.attempts}`;
+  Library.recordDrill("rhythm", {
+    correct, responseMs:result.medianTimingMs || 0, rating:result.rating,
+    details:{accuracy:result.accuracy, expected:result.expected, hits:result.hits, errorTags:result.errorTags},
+  });
+  $("microfeedback").textContent = `命中 ${Math.round(result.accuracy * 100)}% · 中位誤差 ${Math.round(result.medianTimingMs || 0)}ms`;
+  renderLibrary();
+  micro.roundTimer = setTimeout(() => { if (micro.open && micro.kind === "rhythm") renderMicro(); }, 850);
+}
+
+function answerMicro(choice){
+  const micro = state.micro;
+  if (!micro.item) return;
+  const correct = choice === micro.item.answer;
+  const responseMs = Math.round(performance.now() - micro.startedAt);
+  micro.attempts += 1;
+  if (correct) micro.correct += 1;
+  $("microstats").textContent = `${micro.correct} / ${micro.attempts}`;
+  Library.recordDrill(micro.kind, {
+    correct, responseMs,
+    details:{answer:micro.item.answer, chosen:choice, key:micro.item.ex.key?.id, ts:micro.item.ex.ts,
+      position:micro.item.position || null},
+  });
+  $("microfeedback").textContent = correct ? `正確 · ${responseMs}ms` : `答案是 ${micro.item.answer}`;
+  $("microfeedback").style.color = correct ? "#2D6A45" : "#A33A2B";
+  $("microanswers").querySelectorAll("button").forEach((button) => { button.disabled = true; });
+  renderLibrary();
+  micro.roundTimer = setTimeout(() => { if (state.micro.open) renderMicro(); }, 450);
+}
+
+/* ---------- 8 分鐘導引與每週固定測驗 ---------- */
+
+const LESSON_PHASES = [
+  {seconds:15, title:"準備掃描", detail:"先找：調號？最小音符？最難的小節？", kind:"scan"},
+  {seconds:90, title:"1/4 節奏拍打", detail:"先把節奏與音高分開處理", kind:"micro-rhythm"},
+  {seconds:90, title:"2/4 音名快答", detail:"較慢的譜位會提高出題機率", kind:"micro-note"},
+  {seconds:240, title:"3/4 連續流", detail:"六軸自適應；遮罩強迫眼睛留在手前方", kind:"read"},
+  {seconds:60, title:"4/4 弱點重生", detail:"保留卡點特徵，換新種子收尾", kind:"weak"},
+];
+
+function savedSessionSettings(){
+  return {
+    flow:$("flow").value, mask:$("maskmode").value, bars:$("bars").value,
+    bpm:currentBpm(), vector:currentVector(), exerciseOverride:state.exerciseOverride,
+  };
+}
+
+function restoreSessionSettings(saved){
+  if (!saved) return;
+  state.exerciseOverride = saved.exerciseOverride || null;
+  $("flow").value = saved.flow;
+  $("maskmode").value = saved.mask;
+  $("bars").value = saved.bars;
+  applyVectorToUi(saved.vector);
+  setBpm(saved.bpm);
+  syncFlow();
+}
+
+function startLesson(){
+  if (state.weekly) finishWeekly(false);
+  if (state.lesson) return;
+  state.lesson = {
+    phase:0, openedAt:Date.now(), trainingStartedAt:0, phaseEndsAt:0, timer:null,
+    saved:savedSessionSettings(),
+  };
+  $("lessonbar").hidden = false;
+  $("lessonnext").hidden = false;
+  $("lessonstop").textContent = "停止";
+  enterLessonPhase(0);
+  state.lesson.timer = setInterval(tickLesson, 250);
+}
+
+function enterLessonPhase(index){
+  const lesson = state.lesson;
+  if (!lesson) return;
+  if (index >= LESSON_PHASES.length){ stopLesson(true); return; }
+  if (Metro.on) toggleMetro();
+  closeMicro(true);
+  document.body.classList.remove("lesson-scanning");
+  lesson.phase = index;
+  const phase = LESSON_PHASES[index];
+  lesson.phaseEndsAt = Date.now() + phase.seconds * 1000;
+  $("lessonphase").textContent = phase.title;
+  $("lessondetail").textContent = phase.detail;
+
+  if (phase.kind === "scan"){
+    if (state.mode !== "read") setMode("read");
+    state.exerciseOverride = null;
+    state.activeWeaknessId = null;
+    $("flow").value = "manual";
+    $("maskmode").value = "off";
+    syncFlow();
+    generate({fresh:true});
+    document.body.classList.add("lesson-scanning");
+    $("clipmeta").textContent = "先掃描，不要彈：調號？最小音符？最難的小節？";
+    return;
+  }
+  if (!lesson.trainingStartedAt) lesson.trainingStartedAt = Date.now();
+
+  if (phase.kind === "micro-note" || phase.kind === "micro-rhythm"){
+    openMicro(phase.kind === "micro-note" ? "note" : "rhythm", true);
+    return;
+  }
+
+  if (state.mode !== "read") setMode("read");
+  state.exerciseOverride = null;
+  state.activeWeaknessId = null;
+  $("bars").value = "4";
+  $("flow").value = phase.kind === "read" ? "flow" : "manual";
+  $("maskmode").value = phase.kind === "read" ? "follow" : "off";
+  if (phase.kind === "weak" && practiceWeakness()){
+    // practiceWeakness has already generated a feature-preserving score.
+  } else {
+    if (phase.kind === "read"){
+      setBpm(Math.min(60, currentBpm()));
+      const vector = currentVector();
+      vector.eyeHand = Math.max(2, vector.eyeHand);
+      applyVectorToUi(vector);
+    }
+    generate({fresh:true});
+  }
+  if (!Metro.on) toggleMetro();
+}
+
+function tickLesson(){
+  const lesson = state.lesson;
+  if (!lesson) return;
+  const phaseLeft = Math.max(0, Math.ceil((lesson.phaseEndsAt - Date.now()) / 1000));
+  if (lesson.phase === 0){
+    $("lessontime").textContent = `準備 ${String(phaseLeft).padStart(2, "0")}`;
+  } else {
+    const totalLeft = Math.max(0, 480 - Math.floor((Date.now() - lesson.trainingStartedAt) / 1000));
+    $("lessontime").textContent = `${String(Math.floor(totalLeft / 60)).padStart(2, "0")}:${String(totalLeft % 60).padStart(2, "0")}`;
+    if (state.micro.lessonOwned) $("microtime").textContent = `${String(Math.floor(phaseLeft / 60)).padStart(2, "0")}:${String(phaseLeft % 60).padStart(2, "0")}`;
+  }
+  if (phaseLeft <= 0) enterLessonPhase(lesson.phase + 1);
+}
+
+function stopLesson(completed = false){
+  const lesson = state.lesson;
+  if (!lesson) return;
+  clearInterval(lesson.timer);
+  if (Metro.on) toggleMetro();
+  closeMicro(true);
+  document.body.classList.remove("lesson-scanning");
+  const elapsed = lesson.trainingStartedAt
+    ? Math.min(480, Math.max(0, Math.round((Date.now() - lesson.trainingStartedAt) / 1000))) : 0;
+  Library.recordDrill("guided-8min", {responseMs:elapsed * 1000, details:{completed, phase:lesson.phase + 1}});
+  const saved = lesson.saved;
+  state.lesson = null;
+  restoreSessionSettings(saved);
+  $("lessonbar").hidden = true;
+  $("clipmeta").textContent = completed ? "8 分鐘導引完成" : "導引已停止";
+  generate({fresh:true});
+}
+
+const WEEKLY_SEGMENTS = [
+  {seed:0x51a001,level:2,ts:"4/4",hands:"rh",density:"quarter",focus:"none",bars:4,difficulty:presetVector(2)},
+  {seed:0x51a002,level:3,ts:"3/4",hands:"both",lhPattern:"sustain",density:"eighth",focus:"none",bars:4,difficulty:presetVector(3)},
+  {seed:0x51a003,level:3,ts:"4/4",hands:"lh",density:"varied",focus:"leap",bars:4,difficulty:presetVector(3)},
+  {seed:0x51a004,level:4,ts:"4/4",hands:"both",lhPattern:"block",density:"varied",focus:"ledger",bars:4,difficulty:presetVector(4)},
+  {seed:0x51a005,level:4,ts:"3/4",hands:"swap",lhPattern:"arpeggio",density:"varied",focus:"none",bars:4,difficulty:presetVector(4)},
+];
+
+function isoWeekId(date = new Date()){
+  const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  utc.setUTCDate(utc.getUTCDate() + 4 - (utc.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(utc.getUTCFullYear(), 0, 1));
+  const week = Math.ceil((((utc - yearStart) / 86400000) + 1) / 7);
+  return `${utc.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function weeklySeed(base, week){
+  let hash = 2166136261;
+  for (const char of week){ hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); }
+  return (base ^ (hash >>> 0)) >>> 0;
+}
+
+function startWeekly(){
+  if (state.lesson) stopLesson(false);
+  closeMicro(true);
+  if (Metro.on) toggleMetro();
+  const week = isoWeekId();
+  state.weekly = {
+    week, index:0, attempts:[], startedAt:new Date().toISOString(), saved:savedSessionSettings(),
+    eyeHandBeats:EYE_HAND_BEATS[currentVector().eyeHand] ?? 0,
+    noteMedianMs:Library.drillStats("note").medianResponseMs,
+  };
+  $("lessonbar").hidden = false;
+  $("lessonnext").hidden = true;
+  $("lessonstop").textContent = "結束測驗";
+  setupWeeklySegment();
+}
+
+function setupWeeklySegment(){
+  const weekly = state.weekly;
+  if (!weekly) return;
+  if (weekly.index >= WEEKLY_SEGMENTS.length){ finishWeekly(true); return; }
+  if (state.mode !== "read") setMode("read");
+  state.activeWeaknessId = null;
+  const spec = WEEKLY_SEGMENTS[weekly.index];
+  state.exerciseOverride = {...spec, seed:weeklySeed(spec.seed, weekly.week)};
+  $("flow").value = "manual";
+  $("maskmode").value = "off";
+  setBpm(60);
+  syncFlow();
+  $("lessonphase").textContent = `本週測驗 ${weekly.index + 1} / ${WEEKLY_SEGMENTS.length}`;
+  $("lessondetail").textContent = "固定難度規格；每週使用全新種子；無遮蔽・♩=60";
+  $("lessontime").textContent = `${weekly.index + 1}/5`;
+  generate({fresh:true});
+  if (!Metro.on) toggleMetro();
+}
+
+function weeklyAcceptAttempt(attempt){
+  if (!state.weekly || !attempt?.completed || !attempt.rating) return;
+  state.weekly.attempts.push({
+    rating:attempt.rating,
+    accuracy:attempt.metrics?.accuracy ?? null,
+    medianTimingMs:attempt.metrics?.timingMedianMs ?? attempt.metrics?.medianTimingMs ?? null,
+    seed:state.stream?.current()?.seed ?? null,
+  });
+  state.weekly.index += 1;
+  setTimeout(() => {
+    if (!state.weekly) return;
+    if (Metro.on) toggleMetro();
+    setupWeeklySegment();
+  }, 120);
+}
+
+function finishWeekly(completed){
+  const weekly = state.weekly;
+  if (!weekly) return;
+  if (Metro.on) toggleMetro();
+  const details = weekly.attempts;
+  const objective = details.filter((item) => item.accuracy != null);
+  const timing = details.map((item) => item.medianTimingMs).filter(Number.isFinite).sort((a, b) => a - b);
+  const smooth = details.filter((item) => item.rating === "smooth").length;
+  Library.recordWeeklyTest({
+    week:weekly.week, startedAt:weekly.startedAt, endedAt:new Date().toISOString(),
+    segments:WEEKLY_SEGMENTS.length, completed:details.length,
+    accuracy:objective.length ? objective.reduce((sum, item) => sum + item.accuracy, 0) / objective.length : null,
+    medianTimingMs:timing.length ? timing[Math.floor(timing.length / 2)] : null,
+    smoothRate:details.length ? smooth / details.length : null,
+    eyeHandBeats:weekly.eyeHandBeats, noteMedianMs:weekly.noteMedianMs, details,
+  });
+  const saved = weekly.saved;
+  state.weekly = null;
+  restoreSessionSettings(saved);
+  $("lessonbar").hidden = true;
+  $("lessonnext").hidden = false;
+  $("clipmeta").textContent = completed ? `週測完成 · 順暢 ${smooth}/${details.length}` : `週測已結束 · 完成 ${details.length}/5`;
+  generate({fresh:true});
+  renderLibrary();
+}
+
 /* ---------- 拼頁列印 ---------- */
 
 function printSheet(){
@@ -596,8 +1364,8 @@ function printSheet(){
     const ex = generateExercise(Object.assign({}, e.cfg));
     const div = document.createElement("div");
     div.className = "item";
-    div.innerHTML = '<div class="cap">' + (i + 1) + ". " + e.keyName +
-                    " · lv" + e.level + " · " + e.ts + " · " + e.roman + "</div>" +
+    div.innerHTML = '<div class="cap">' + (i + 1) + ". " + esc(e.keyName) +
+                    " · lv" + esc(e.level) + " · " + esc(e.ts) + " · " + esc(e.roman) + "</div>" +
                     '<div class="sc"></div>';
     out.appendChild(div);
     // 列印用固定寬度，不受目前視窗大小影響
@@ -633,6 +1401,7 @@ function updateCursor(posOverride){
 
   const pos = (posOverride !== undefined) ? posOverride : Metro.position();
   if (pos < 0){ el.hidden = true; return; }        // 預備拍期間不顯示
+  updateEyeMask(pos);
 
   const layout = state.layouts[state.nowRow];
   if (!layout || !layout.length){ el.hidden = true; return; }
@@ -676,6 +1445,7 @@ function stopCursor(){
   if (state.cursorRaf) cancelAnimationFrame(state.cursorRaf);
   state.cursorRaf = null;
   state.rows.forEach(r => { r.querySelector(".cursor").hidden = true; });
+  if ($("maskmode").value === "follow") clearEyeMasks();
 }
 
 function renderAnswerBox(){
@@ -698,8 +1468,9 @@ function redraw(){
 /* ---------- 出題 ---------- */
 
 function readCfg(){
-  return {
+  const base = {
     level: parseInt($("lv").value, 10),
+    difficulty:currentVector(),
     keyPool: $("keysel").value,
     ts: $("ts").value,
     hands: $("hands").value,
@@ -710,6 +1481,7 @@ function readCfg(){
     bars: parseInt($("bars").value, 10),
     step: state.step
   };
+  return state.exerciseOverride ? Object.assign(base, state.exerciseOverride) : base;
 }
 
 /* 重複次數的欄位只有在「重複同一段」時才有意義 */
@@ -722,6 +1494,7 @@ function syncFlow(){
    走 restyle 而不是重新出題 —— 換了題目就不是「同一段」，那就沒得比了。 */
 function swapHands(){
   if (state.mode !== "read" || !state.stream || !state.stream.current()) return;
+  if (Metro.on) finishCurrentAttempt(false, "changed", currentAttemptBars());
   const sel = $("hands");
   sel.value = HAND_SWAP[sel.value] || "swap";
   refreshLhPatterns();
@@ -729,8 +1502,10 @@ function swapHands(){
   state.reviewIdx = -1;
   $("stage").classList.remove("reviewing");
   state.stream.restyle({hands: sel.value});
+  if (Metro.on) state.stream.segStartBar = nextAttemptStartBar(state.stream.current());
   renderRead();
   logCurrent();
+  if (Metro.on) beginCurrentAttempt();
   syncSwapButton();
 }
 
@@ -745,6 +1520,7 @@ function syncSwapButton(){
 
 function generate(opts){
   const o = opts || {};
+  if (Metro.on) finishCurrentAttempt(false, "changed", currentAttemptBars());
   Audio.stop();
   highlight(null);
   setPlayLabel(false);
@@ -758,9 +1534,10 @@ function generate(opts){
     else if (o.fresh) state.stream.reset();
     else state.stream.regenerate();
     // 手動換題等於把節拍器的段落起點對到現在
-    state.stream.segStartBar = Metro.on ? Metro.barsDone : 0;
+    state.stream.segStartBar = Metro.on ? nextAttemptStartBar(state.stream.current()) : 0;
     renderRead();
     logCurrent();
+    if (Metro.on) beginCurrentAttempt();
   } else {
     const drill = {
       prog: $("prog").value,
@@ -804,9 +1581,12 @@ function toggleReveal(){
 }
 
 function setMode(m){
+  if (Metro.on) toggleMetro();
+  if (state.micro.open) closeMicro(true);
   state.mode = m;
   $("mode-read").setAttribute("aria-pressed", m === "read" ? "true" : "false");
   $("mode-chord").setAttribute("aria-pressed", m === "chord" ? "true" : "false");
+  $("mode-micro").setAttribute("aria-pressed", "false");
   $("panel-read").hidden = (m !== "read");
   $("panel-chord").hidden = (m !== "chord");
   generate();
@@ -858,6 +1638,66 @@ function togglePlay(){
 
 /* ---------- 節拍器 ---------- */
 
+function nextAttemptStartBar(cur){
+  if (!Metro.on || !cur) return 0;
+  const positionInBars = Metro.position() / (cur.beats || 4);
+  return Math.max(Metro.barsDone, Math.ceil(positionInBars - 0.0001), 0);
+}
+
+function currentAttemptBars(){
+  if (!Metro.on || state.mode !== "read" || !state.stream) return 0;
+  const cur = state.stream.current();
+  if (!cur) return 0;
+  const elapsed = Metro.position() / (cur.beats || 4) - state.stream.segStartBar;
+  return Math.max(0, Math.min(cur.cfg.bars, elapsed));
+}
+
+function beginCurrentAttempt(){
+  if (!Metro.on || state.mode !== "read" || state.reviewIdx !== -1 || !state.stream) return null;
+  const cur = state.stream.current();
+  if (!cur) return null;
+  const attempt = Library.startAttempt(cur, {
+    barsPlanned: cur.cfg.bars,
+    bpm: currentBpm(),
+    mode: state.mode,
+    flow: $("flow").value,
+    targetAxis:Library.data.adaptive.lastAxis,
+    weaknessId:state.activeWeaknessId,
+  });
+  if (attempt){
+    state.libId = attempt.exerciseId;
+    if (state.inputMode && Metro.ac){
+      const firstBeat = state.stream.segStartBar * (cur.beats || 4);
+      const startMs = performance.now() + (Metro.timeOfBeat(firstBeat) - Metro.ac.currentTime) * 1000;
+      state.matcher = new PerformanceMatcher(state.plan, currentBpm(), startMs, state.inputMode);
+    } else {
+      state.matcher = null;
+    }
+  }
+  return attempt;
+}
+
+function finishCurrentAttempt(completed, reason, barsCompleted){
+  if (!Library.activeAttemptId) return null;
+  // 連續流不能被表單卡住：上一段若一直沒評，直到下一段完成才預設為「順」。
+  if (completed) ratePending("smooth", true);
+  const metrics = state.matcher?.result() || null;
+  state.matcher = null;
+  const attempt = Library.finishAttempt({completed, reason, barsCompleted, metrics, errorTags:metrics?.errorTags});
+  if (attempt){
+    if (completed && metrics?.hits){
+      const result = Library.rateAttempt(attempt.id, metrics.rating);
+      const adjustment = applyStaircase(result);
+      $("clipmeta").textContent = `偵測 ${Math.round(metrics.accuracy * 100)}% · ${metrics.rating === "smooth" ? "順" : (metrics.rating === "stumble" ? "有絆" : "垮掉")}` +
+        (adjustment ? ` · ${adjustment}` : "");
+      weeklyAcceptAttempt(attempt);
+      if (attempt.weaknessId){ state.exerciseOverride = null; state.activeWeaknessId = null; }
+    } else if (completed) askForRating(attempt);
+    renderLibrary();
+  }
+  return attempt;
+}
+
 function buildBeatStrip(n){
   const s = $("beatstrip");
   if (s.children.length === n) return;
@@ -890,11 +1730,17 @@ Metro.onBeat = (i, counting) => {
 Metro.onBar = (barsDone) => {
   $("barcount").textContent = String(barsDone);
   if (state.mode !== "read" || !state.stream) return;
-  if ($("flow").value === "manual" || state.reviewIdx !== -1) return;
+  if (state.reviewIdx !== -1) return;
   const cur = state.stream.current();
   if (!cur) return;
   // 彈滿一整段才換 —— 舊版在最後一小節的第一拍就換，等於少給一小節
   if (barsDone - state.stream.segStartBar < cur.cfg.bars) return;
+
+  finishCurrentAttempt(true, "completed", cur.cfg.bars);
+  if ($("flow").value === "manual"){
+    $("clipmeta").textContent = "本段完成 · 節拍器仍在跑";
+    return;
+  }
 
   Audio.stop(); highlight(null); setPlayLabel(false);
 
@@ -907,12 +1753,14 @@ Metro.onBar = (barsDone) => {
       state.stream.segStartBar = barsDone;
       $("clipmeta").textContent = liveLabel();
       startPlayAlong();
+      beginCurrentAttempt();
       return;
     }
     state.loopCount = 0;
   }
 
   advanceSegment(barsDone);
+  beginCurrentAttempt();
   startPlayAlong();          // 新的一段接著播，中間不斷
 };
 
@@ -928,6 +1776,10 @@ function setMetroLabel(on){
 
 function toggleMetro(){
   if (Metro.on){
+    const barsCompleted = currentAttemptBars();
+    const planned = state.stream?.current()?.cfg?.bars || 0;
+    const completed = planned > 0 && barsCompleted >= planned;
+    finishCurrentAttempt(completed, completed ? "completed" : "stopped", barsCompleted);
     Metro.stop();
     stopCursor();
     Wake.release();
@@ -959,6 +1811,7 @@ function toggleMetro(){
   $("clipmeta").textContent = "預備";
   Wake.request();
   state.practiceStart = Date.now();
+  beginCurrentAttempt();
   startPlayAlong();
   renderAudioStatus();
 }
@@ -1054,6 +1907,8 @@ function bind(){
   });
   $("mode-read").addEventListener("click", () => setMode("read"));
   $("mode-chord").addEventListener("click", () => setMode("chord"));
+  $("mode-micro").addEventListener("click", () => openMicro(state.micro.kind));
+  $("startlesson").addEventListener("click", startLesson);
   $("gen").addEventListener("click", () => generate());
   $("reveal").addEventListener("click", toggleReveal);
   $("print").addEventListener("click", () => window.print());
@@ -1063,12 +1918,33 @@ function bind(){
   $("fabgen").addEventListener("click", () => generate());
 
   $("swaphands").addEventListener("click", swapHands);
+  $("ratingbar").addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-rating]");
+    if (button) ratePending(button.dataset.rating, false);
+  });
+  $("adaptive").addEventListener("change", function(){
+    Library.setAdaptive({enabled:this.checked, level:parseInt($("lv").value, 10), density:$("dens").value, vector:currentVector()});
+  });
+
+  $("maskmode").addEventListener("change", setupEyeMask);
+  $("scansecs").addEventListener("change", setupEyeMask);
 
   // 出題設定變了，整條佇列都要重來（下一段是用舊設定生的）
   ["lv", "ts", "hands"].forEach(id =>
-    $(id).addEventListener("change", () => { refreshLhPatterns(); generate({fresh:true}); }));
+    $(id).addEventListener("change", () => {
+      if (Metro.on) toggleMetro();
+      if (id === "lv") applyVectorToUi(presetVector(parseInt($("lv").value, 10) || 1), {persist:true});
+      refreshLhPatterns();
+      generate({fresh:true});
+    }));
   ["keysel", "bars", "lhpat", "dens", "focus", "inv"].forEach(id =>
-    $(id).addEventListener("change", () => generate({fresh:true})));
+    $(id).addEventListener("change", () => {
+      if (Metro.on) toggleMetro();
+      generate({fresh:true});
+    }));
+  ["lv", "dens"].forEach(id => $(id).addEventListener("change", () => {
+    Library.setAdaptive({level:parseInt($("lv").value, 10), density:$("dens").value});
+  }));
   // 換流程不必換題目 —— 只是重畫（反覆記號、預讀那一列）並歸零遍數
   $("flow").addEventListener("change", () => { syncFlow(); redraw(); });
   $("reps").addEventListener("change", () => { state.loopCount = 0; });
@@ -1139,17 +2015,56 @@ function bind(){
   $("revtoggle").addEventListener("click", () => toggleReviewList());
   $("revback").addEventListener("click", exitReview);
   $("markbad").addEventListener("click", toggleMark);
+  $("practiceweak").addEventListener("click", () => practiceWeakness());
+  $("startweekly").addEventListener("click", startWeekly);
+  $("connectmidi").addEventListener("click", connectMidi);
+  $("connectmic").addEventListener("click", connectMicrophone);
+  $("closemicro").addEventListener("click", () => closeMicro());
+  $("microlevel").addEventListener("change", () => {
+    try { localStorage.setItem(MICRO_LEVEL_KEY, String(microLevel())); } catch {}
+    if (state.micro.open) renderMicro();
+  });
+  $("micropanel").querySelectorAll("[data-kind]").forEach((button) => button.addEventListener("click", () => {
+    state.micro.kind = button.dataset.kind;
+    $("micropanel").querySelectorAll("[data-kind]").forEach((item) =>
+      item.setAttribute("aria-pressed", item === button ? "true" : "false"));
+    renderMicro();
+  }));
+  $("lessonnext").addEventListener("click", () => {
+    if (state.lesson) enterLessonPhase(state.lesson.phase + 1);
+  });
+  $("lessonstop").addEventListener("click", () => {
+    if (state.weekly) finishWeekly(false);
+    else if (state.lesson) stopLesson(false);
+  });
   $("printsheet").addEventListener("click", printSheet);
-  $("clearlib").addEventListener("click", () => {
+  $("exportlib").addEventListener("click", exportLibrary);
+  $("importlib").addEventListener("click", () => $("importfile").click());
+  $("importfile").addEventListener("change", async function(){
+    await importLibrary(this.files?.[0]);
+    this.value = "";
+  });
+  $("clearlib").addEventListener("click", async () => {
     if (!confirm("清除全部長期練習紀錄？包含複習清單與累計時數。")) return;
-    Library.clear();
+    if (Metro.on) toggleMetro();
+    await Library.clear();
     state.libId = null;
+    state.pendingRatingId = null;
+    $("ratingbar").hidden = true;
+    applyStoredAdaptive();
     renderLibrary();
     syncMarkButton();
   });
 
   // 練到一半關掉分頁，時數也要算進去
   window.addEventListener("pagehide", () => {
+    if (Metro.on){
+      const barsCompleted = currentAttemptBars();
+      const planned = state.stream?.current()?.cfg?.bars || 0;
+      const completed = planned > 0 && barsCompleted >= planned;
+      finishCurrentAttempt(completed, completed ? "completed" : "interrupted", barsCompleted);
+    }
+    ratePending("smooth", true);
     if (state.practiceStart){
       Library.addSeconds((Date.now() - state.practiceStart) / 1000);
       state.practiceStart = 0;
@@ -1159,7 +2074,18 @@ function bind(){
   document.addEventListener("keydown", (e) => {
     if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
     const k = e.key.toLowerCase();
-    if (k === "n"){ e.preventDefault(); generate(); }
+    if (document.body.classList.contains("lesson-scanning") && ["m", "p", "n", "r"].includes(k)){
+      e.preventDefault();
+    }
+    else if (state.micro.open && state.micro.kind === "rhythm" && e.code === "Space"){
+      e.preventDefault();
+      tapRhythm();
+    }
+    else if (state.pendingRatingId && (k === "1" || k === "2" || k === "3")){
+      e.preventDefault();
+      ratePending({"1":"smooth", "2":"stumble", "3":"collapse"}[k], false);
+    }
+    else if (k === "n"){ e.preventDefault(); generate(); }
     else if (k === "r"){ e.preventDefault(); generate({sameSeed:true}); }
     else if (k === "x"){ e.preventDefault(); toggleMark(); }
     else if (k === "s"){ e.preventDefault(); toggleReveal(); }
@@ -1192,16 +2118,20 @@ function registerServiceWorker(){
 async function boot(){
   state.rows = [$("rowA"), $("rowB")];
   state.stream = new Stream(readCfg);
-  Library.load();
+  await Library.load();
+  Library.requestPersistence();
   fillLevels();
   fillHands();
   fillDensity();
   fillFocus();
   fillInversions();
+  fillAxisControls();
+  applyStoredAdaptive();
   fillKeySelect();
   refreshLhPatterns();
   fillProgressions();
   refreshChordKeys();
+  restoreMicroLevel();
   setBpm(parseInt($("bpm").value, 10));
   $("zoomread").textContent = $("zoom").value + "%";
   Metro.volume = parseInt($("vol").value, 10) / 100;

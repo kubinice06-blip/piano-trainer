@@ -43,6 +43,8 @@
   <div class="modes" role="group" aria-label="練習模式">
     <button id="mode-read" aria-pressed="true">視譜</button>
     <button id="mode-chord" aria-pressed="false">和弦</button>
+    <button id="mode-micro" aria-pressed="false">微練習</button>
+    <button id="startlesson" aria-pressed="false">8 分鐘導引</button>
   </div>
 
   <div id="panel-read">
@@ -121,6 +123,31 @@
           <option value="8">8 遍</option>
         </select>
       </div>
+      <label class="check">
+        <input type="checkbox" id="adaptive" checked>
+        依「順／有絆／垮掉」自動調整難度
+      </label>
+      <div class="axis-head"><span>六軸難度</span><small id="axistarget">目前強化：—</small></div>
+      <div class="axis-grid" id="axiscontrols"></div>
+    </fieldset>
+
+    <fieldset>
+      <legend>視線與眼手距離</legend>
+      <div class="row2">
+        <div class="field">
+          <label for="maskmode">移動遮罩</label>
+          <select id="maskmode">
+            <option value="off">關閉</option>
+            <option value="follow">隨拍遮住已讀區</option>
+            <option value="flash">掃描後全部遮住</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="scansecs">掃描秒數</label>
+          <select id="scansecs"><option>2</option><option selected>3</option><option>4</option><option>5</option><option>8</option><option>15</option></select>
+        </div>
+      </div>
+      <div class="line" id="maskstatus">眼手距離：關閉</div>
     </fieldset>
 
     <fieldset>
@@ -220,6 +247,14 @@
   <fieldset>
     <legend>練習紀錄</legend>
     <div class="stats" id="stats"></div>
+    <div class="weak-actions">
+      <button class="btn btn-primary" id="practiceweak">複習到期弱點 <b id="duecount">0</b></button>
+      <button class="btn btn-ghost" id="startweekly">開始本週 5 段測驗</button>
+    </div>
+    <div class="heatmap" id="weakheat"></div>
+    <div class="kpi-trend" id="weeklytrend"></div>
+    <div class="line" id="noteheatlabel" hidden>音名反應較慢的位置</div>
+    <div class="heatmap" id="noteheat"></div>
     <div class="marked-head">
       複習清單 <b id="markcount">0</b> 段
       <span class="dimhint">練習中按 <kbd>X</kbd> 標記</span>
@@ -227,8 +262,20 @@
     <div class="review-list" id="marklist"></div>
     <div class="btnrow">
       <button class="btn btn-ghost" id="printsheet">列印練習單</button>
+      <button class="btn btn-ghost" id="exportlib">匯出備份</button>
+      <button class="btn btn-ghost" id="importlib">匯入還原</button>
       <button class="btn btn-ghost" id="clearlib">清除紀錄</button>
     </div>
+    <input id="importfile" type="file" accept="application/json,.json" hidden>
+  </fieldset>
+
+  <fieldset>
+    <legend>演奏偵測（選用）</legend>
+    <div class="btnrow">
+      <button class="btn btn-ghost" id="connectmidi">連接 MIDI</button>
+      <button class="btn btn-ghost" id="connectmic">使用 iPad 麥克風</button>
+    </div>
+    <div class="line" id="inputstatus">未連接；完成後仍可用「順／有絆／垮掉」自評。</div>
   </fieldset>
 
   <button class="btn btn-ghost" id="play" style="width:100%">播放解答音</button>
@@ -284,6 +331,13 @@
       <div class="answerbox" id="answer" hidden></div>
     </div>
 
+    <div class="ratingbar" id="ratingbar" hidden role="group" aria-label="評估剛才這一段">
+      <span>剛才這段</span>
+      <button type="button" data-rating="smooth"><kbd>1</kbd> 順</button>
+      <button type="button" data-rating="stumble"><kbd>2</kbd> 有絆</button>
+      <button type="button" data-rating="collapse"><kbd>3</kbd> 垮掉</button>
+    </div>
+
     <div class="review" id="review" hidden>
       <div class="review-head">
         <button class="rev-toggle" id="revtoggle" aria-expanded="true">
@@ -298,6 +352,42 @@
     </div>
   </div>
 </main>
+
+<section class="micro-panel" id="micropanel" hidden aria-label="微練習">
+  <div class="micro-card">
+    <div class="micro-head">
+      <div><b>90 秒微練習</b><span><span id="microtime">01:30</span> · <span id="microstats">0 / 0</span></span></div>
+      <button class="iconbtn" id="closemicro" aria-label="關閉">×</button>
+    </div>
+    <div class="micro-kinds" role="group">
+      <button data-kind="note" aria-pressed="true">音名</button>
+      <button data-kind="rhythm" aria-pressed="false">節奏</button>
+      <button data-kind="shape" aria-pressed="false">形狀</button>
+    </div>
+    <label class="micro-level" for="microlevel">
+      <span>微練習難度</span>
+      <select id="microlevel">
+        <option value="1">1 · 入門</option>
+        <option value="2">2 · 基礎</option>
+        <option value="3" selected>3 · 標準</option>
+        <option value="4">4 · 進階</option>
+        <option value="5">5 · 挑戰</option>
+        <option value="6">6 · 極限</option>
+      </select>
+    </label>
+    <p id="microquestion"></p>
+    <div class="micro-score" id="microscore"></div>
+    <div class="microanswers" id="microanswers"></div>
+    <div class="microfeedback" id="microfeedback"></div>
+  </div>
+</section>
+
+<div class="lessonbar" id="lessonbar" hidden>
+  <div><b id="lessonphase">8 分鐘導引</b><span id="lessondetail"></span></div>
+  <strong id="lessontime">08:00</strong>
+  <button class="btn btn-ghost" id="lessonnext">下一段</button>
+  <button class="btn btn-ghost" id="lessonstop">停止</button>
+</div>
 
 <!-- 觸控裝置的浮動控制：在譜架上，頂欄那一排離手太遠。
      只有 pointer:coarse 才顯示（見 app.css）。 -->

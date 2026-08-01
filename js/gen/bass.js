@@ -8,11 +8,15 @@ import { chordAt } from "./harmony.js";
 import { DUR } from "./rhythm.js";
 
 /* 依難度可以用哪些模式。愈後面手部獨立要求愈高。 */
+/* 塊狀和弦／華爾滋式伴奏原本要求第 3 級才開放，理由其實不是難度，
+   是「左手音域不夠寬，三個音疊起來會擠成一團」—— 那是音域的問題，
+   不是彈奏難度的問題。音域現在由 exercise.js 的 chordRange() 保證撐到至少一個八度，
+   所以和弦伴奏在所有難度都選得到。 */
 export const LH_PATTERNS = {
   sustain:   {label:"持續低音",       minLevel:1, needsMelody:false},
-  rootFifth: {label:"根音－五音",     minLevel:2, needsMelody:false},
-  block:     {label:"塊狀和弦",       minLevel:3, needsMelody:false},
-  waltz:     {label:"低音－和弦－和弦", minLevel:3, needsMelody:false, tsOnly:"3/4"},
+  rootFifth: {label:"根音－五音",     minLevel:1, needsMelody:false},
+  block:     {label:"塊狀和弦",       minLevel:1, needsMelody:false},
+  waltz:     {label:"低音－和弦－和弦", minLevel:1, needsMelody:false, tsOnly:"3/4"},
   arpeggio:  {label:"分解和弦",       minLevel:4, needsMelody:false},
   alberti:   {label:"阿爾貝提低音",   minLevel:4, needsMelody:false, tsOnly:"4/4"},
   parallel:  {label:"與旋律平行三/六度", minLevel:5, needsMelody:true},

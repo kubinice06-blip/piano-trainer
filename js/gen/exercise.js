@@ -163,8 +163,10 @@ export function generateExercise(cfg){
     return out;
   }
 
-  // 雙手：右手旋律 + 左手伴奏
-  const lh = bassLine(rng.fork("lh"), inner, H, key, range(spec, "bass"), mel.measures,
+  // 雙手：右手旋律 + 左手伴奏。
+  // 第 1 級的左手音域只有五度，塞不下三個音疊起來的和弦，所以撐開到至少一個八度 ——
+  // 這樣「塊狀和弦」這類寫法在所有難度都選得到，不用等音域自然變寬的第 3 級。
+  const lh = bassLine(rng.fork("lh"), inner, H, key, chordRange(range(spec, "bass")), mel.measures,
                       cfg.lhPattern, {clef:"bass", dir:-1, inversion});
   out.lhLabel = "左手" + lh.label;
   out.lhPattern = lh.pattern;

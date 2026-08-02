@@ -49,12 +49,41 @@
 
   <div id="panel-read">
     <fieldset>
-      <legend>出題</legend>
+      <legend>練習工具</legend>
       <div class="row2">
         <div class="field">
           <label for="lv">難度</label>
           <select id="lv"></select>
         </div>
+        <div class="field">
+          <label for="hands">練習手</label>
+          <select id="hands"></select>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="dens">音符長短</label>
+          <select id="dens"></select>
+        </div>
+        <div class="field">
+          <label for="focus">強化練習</label>
+          <select id="focus"></select>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="showfingering" checked> 顯示指法與轉指位置</label>
+      <label class="check">
+        <input type="checkbox" id="adaptive" checked>
+        依「順／有絆／垮掉」自動調整難度
+      </label>
+      <details class="difficulty-details">
+        <summary>六軸難度微調 <small id="axistarget">目前強化：—</small></summary>
+        <div class="axis-grid" id="axiscontrols"></div>
+      </details>
+    </fieldset>
+
+    <fieldset>
+      <legend>出題範圍</legend>
+      <div class="row2">
         <div class="field">
           <label for="ts">拍號</label>
           <select id="ts">
@@ -63,27 +92,15 @@
             <option value="2/4">2/4</option>
           </select>
         </div>
-      </div>
-      <div class="field">
-        <label for="keysel">調性</label>
-        <select id="keysel"></select>
-      </div>
-      <div class="field">
-        <label for="dens">音符長短</label>
-        <select id="dens"></select>
-      </div>
-      <div class="field">
-        <label for="focus">強化練習</label>
-        <select id="focus"></select>
+        <div class="field">
+          <label for="keysel">調性</label>
+          <select id="keysel"></select>
+        </div>
       </div>
     </fieldset>
 
     <fieldset>
       <legend>兩手與伴奏</legend>
-      <div class="field">
-        <label for="hands">練習手</label>
-        <select id="hands"></select>
-      </div>
       <button class="btn btn-ghost btn-wide" id="swaphands">⇄ 左右手交換練同一段</button>
       <div class="field">
         <label for="lhpat">伴奏寫法<small class="hint">沒拿旋律的那隻手</small></label>
@@ -123,12 +140,6 @@
           <option value="8">8 遍</option>
         </select>
       </div>
-      <label class="check">
-        <input type="checkbox" id="adaptive" checked>
-        依「順／有絆／垮掉」自動調整難度
-      </label>
-      <div class="axis-head"><span>六軸難度</span><small id="axistarget">目前強化：—</small></div>
-      <div class="axis-grid" id="axiscontrols"></div>
     </fieldset>
 
     <fieldset>
@@ -319,6 +330,7 @@
         </div>
         <div class="sub" id="sheetSub">—</div>
       </div>
+      <div class="finger-guide" id="fingerguide" hidden></div>
       <div class="stage" id="stage">
         <div class="row" id="rowA">
           <div class="rowtag"></div>
@@ -412,6 +424,6 @@
 <!-- 拼頁列印用；平常不顯示，只有列印練習單時才排進頁面 -->
 <div class="printsheet" id="sheetout" hidden></div>
 
-<script type="module" src="js/main.js?v=10"></script>
+<script type="module" src="js/main.js?v=12"></script>
 </body>
 </html>

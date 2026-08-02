@@ -33,6 +33,12 @@ const P = {
   I_IV:      {label:"I–IV–iii–vi", cat:"基礎", minor:false,
               bars:[[["P1","maj7"]], [["P4","maj7"]], [["M3","m7"]], [["M6","m7"]]]},
 
+  /* 根音每次下行純五度：C → F → B → E → A → D → G → C。
+     七個調性和弦形成完整圈，最後用 V7 回到 I。 */
+  circle_down:{label:"五度圈下行（I–IV–viiø–iii–vi–ii–V–I）", cat:"五度圈", minor:false,
+              bars:[[["P1","maj7"]], [["P4","maj7"]], [["M7","m7b5"]], [["M3","m7"]],
+                    [["M6","m7"]], [["M2","m7"]], [["P5","dom7"]], [["P1","maj7"]]]},
+
   /* ---------- 代理與經過 ---------- */
   tritone:   {label:"三全音代理 ii–♭II7–I", cat:"代理", minor:false,
               bars:[[["M2","m7"]], [["m2","dom7s11"]], [["P1","maj7"]], [["P1","maj7"]]]},

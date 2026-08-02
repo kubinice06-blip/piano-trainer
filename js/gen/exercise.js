@@ -11,7 +11,7 @@ import { normaliseVector, generatorLevels } from "../adaptive.js";
 
 /* Stored with every new exercise/attempt. Increment this whenever a generator
    change can make the same seed + settings produce a different score. */
-export const GENERATOR_VERSION = 2;
+export const GENERATOR_VERSION = 3;
 
 /* 難度不再綁死調名清單，改成「調號數上限」——
    所以每個難度都自然涵蓋到該範圍內的全部調，含小調。 */
@@ -73,6 +73,26 @@ function range(spec, which){
 function chordRange(r){
   if (dIdx(r.hi) - dIdx(r.lo) >= 7) return r;
   return {lo: r.lo, hi: N(r.lo.l, r.lo.a, r.lo.o + 1)};
+}
+
+function limitBeginnerLeftHand(measures, maxSpan = 4){
+  for (const measure of measures){
+    for (const item of measure){
+      if (!item.chordNotes || item.chordNotes.length < 2) continue;
+      const notes = item.chordNotes.slice().sort((a, b) => dIdx(a) - dIdx(b));
+      let best = [];
+      for (let from = 0; from < notes.length; from++){
+        for (let to = from; to < notes.length; to++){
+          if (dIdx(notes[to]) - dIdx(notes[from]) > maxSpan) break;
+          const candidate = notes.slice(from, to + 1);
+          if (candidate.length > best.length) best = candidate;
+        }
+      }
+      item.chordNotes = best.length ? best : [notes[0]];
+      item.note = item.chordNotes[0];
+    }
+  }
+  return measures;
 }
 
 function lastNoteOf(measures){
@@ -176,10 +196,13 @@ export function generateExercise(cfg){
   }
 
   // 雙手：右手旋律 + 左手伴奏。
-  // 第 1 級的左手音域只有五度，塞不下三個音疊起來的和弦，所以撐開到至少一個八度 ——
-  // 這樣「塊狀和弦」這類寫法在所有難度都選得到，不用等音域自然變寬的第 3 級。
-  const lh = bassLine(rng.fork("lh"), inner, H, key, chordRange(range(spec, "bass")), mel.measures,
+  // 初階的核心是固定五指手位：左手從最低到最高不得超過五度。
+  // 第 2 級起才為塊狀和弦擴到一個八度；這個判斷跟著「音高音域」軸，而不是總難度。
+  const beginnerLeftRange = range(spec, "bass");
+  const accompanimentRange = axis.rangeLevel === 1 ? beginnerLeftRange : chordRange(beginnerLeftRange);
+  const lh = bassLine(rng.fork("lh"), inner, H, key, accompanimentRange, mel.measures,
                       cfg.lhPattern, {clef:"bass", dir:-1, inversion});
+  if (axis.rangeLevel === 1) limitBeginnerLeftHand(lh.measures);
   out.lhLabel = "左手" + lh.label;
   out.lhPattern = lh.pattern;
   for (let i = 0; i < barCount; i++) out.measures.push({top: mel.measures[i], bottom: lh.measures[i]});

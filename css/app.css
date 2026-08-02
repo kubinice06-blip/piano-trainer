@@ -267,6 +267,13 @@ input[type="range"]{
   background:#F6EEDC;color:#17333E;cursor:pointer;font-family:var(--han);font-weight:700;
 }
 .paper-piano-toggle[aria-expanded="true"]{background:#17333E;color:#F6EEDC;border-color:#17333E;}
+.finger-guide{
+  flex:0 0 auto;margin:-7px 0 10px;padding:7px 10px;border-left:3px solid #B4462F;
+  background:#EFE4CE;color:#5E513D;font-size:11.5px;line-height:1.45;
+}
+.finger-guide[hidden]{display:none;}
+.fingerhint{font-family:var(--mono);font-size:10px;font-weight:700;fill:#6B6551;text-anchor:middle;}
+.fingerhint.turn{font-size:11px;fill:#B4462F;}
 /* ---------- 舞台：現在這一段 + 已經畫好的下一段 ----------
    高度是由 score.js 依 maxHeight 算好才畫的，所以正常情況剛好放得下。
    縮到 70% 還是放不下時（螢幕太矮 + 小節太多），改由這裡捲 ——
@@ -423,6 +430,10 @@ input[type="range"]{
 .stats .ok{color:var(--brass);font-family:var(--mono);}
 .axis-head{display:flex;justify-content:space-between;align-items:baseline;margin:14px 0 8px;color:var(--brass);font-size:12px;}
 .axis-head small{color:var(--bone-dim);font-size:10.5px;}
+.difficulty-details{margin-top:10px;border:1px solid rgba(220,212,192,.18);padding:8px 9px;}
+.difficulty-details summary{cursor:pointer;color:var(--brass);font-size:12px;line-height:1.5;}
+.difficulty-details summary small{display:block;color:var(--bone-dim);font-size:10.5px;margin-top:2px;}
+.difficulty-details[open] summary{margin-bottom:9px;}
 .axis-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .axis-item{display:grid;gap:3px;font-size:10.5px;color:var(--bone-dim);}
 .axis-item select{width:100%;}

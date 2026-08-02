@@ -6,6 +6,7 @@
 import { VF } from "./vexloader.js";
 import { vexKey, accVex, noteName, midiOf } from "../core/pitch.js";
 import { DUR, tsInfo } from "../gen/rhythm.js";
+import { melodyFingering } from "../fingering.js";
 
 function attachAccidental(note, idx, accStr){
   try {
@@ -119,6 +120,19 @@ function playbackEvents(items, base, part, measure){
   return events;
 }
 
+function drawFingering(svg, notes, hints, y){
+  if (!svg || !notes || !hints) return;
+  for (var i = 0; i < notes.length; i++){
+    var hint = hints[i];
+    if (!hint) continue;
+    try {
+      svgText(svg, notes[i].getAbsoluteX(), y,
+              "fingerhint" + (hint.transition ? " turn" : ""),
+              (hint.transition ? "↪" : "") + hint.finger);
+    } catch (e) {}
+  }
+}
+
 /* 解答音直接由題目資料建立，不再依賴「該聲部是否成功畫到 SVG」。
    這讓左右手是可測試的播放資料；iPad 上即使繪圖降級，也不會只剩右手有聲。 */
 export function exercisePlaybackPlan(ex){
@@ -167,6 +181,7 @@ export function drawExercise(el, ex, opts){
   if (!VF) return plan;
 
   var o = opts || {};
+  var fingering = o.showFingering ? melodyFingering(ex) : null;
   var grand = ex.clef === "grand";
   var zoom = o.zoom || 1;
   var px = Math.max(320, el.clientWidth || 900);
@@ -306,8 +321,14 @@ export function drawExercise(el, ex, opts){
       drawBeams(ctx, topNotes, ex.ts);
       if (botNotes) drawBeams(ctx, botNotes, ex.ts);
 
+      if (fingering && fingering.side === "top"){
+        drawFingering(svg, topNotes, fingering.measures[mi], st.getBottomY() + 13);
+      } else if (fingering && fingering.side === "bottom" && sb && botNotes){
+        drawFingering(svg, botNotes, fingering.measures[mi], sb.getBottomY() + 13);
+      }
+
       if (o.showNames && svg){
-        var lowY = (sb ? sb.getBottomY() : st.getBottomY()) + 16;
+        var lowY = (sb ? sb.getBottomY() : st.getBottomY()) + (fingering ? 29 : 16);
         var lowItems = sb ? md.bottom : md.top;
         var lowNotes = sb ? botNotes : topNotes;
         for (var q = 0; q < lowNotes.length; q++){

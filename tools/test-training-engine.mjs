@@ -6,6 +6,10 @@ import { PerformanceMatcher } from "../js/input/performance.js";
 import { buildTapEvents, pianoRange, TapSightMatcher } from "../js/drills/tap-piano.js";
 import { exercisePlaybackPlan } from "../js/render/score.js";
 import { playbackVoiceProfile } from "../js/audio/sound.js";
+import { melodyFingering } from "../js/fingering.js";
+import { N, dIdx, noteName } from "../js/core/pitch.js";
+import { Key } from "../js/core/key.js";
+import { realize } from "../js/gen/chordprog.js";
 
 assert.equal(AXES.length, 6);
 const highRhythm = stepVector(normaliseVector(null, 2), "rhythm", "up");
@@ -19,7 +23,7 @@ const cfg = {
 };
 const original = generateExercise(cfg);
 original.usedCfg = {...cfg, seed:original.seed, generatorVersion:GENERATOR_VERSION};
-assert.equal(original.generatorVersion, 2);
+assert.equal(original.generatorVersion, 3);
 assert.equal(original.measures.length, 4);
 const answerPlan = exercisePlaybackPlan(original);
 assert.ok(answerPlan.events.some((event) => event.part === "right"), "answer audio includes right hand");
@@ -35,6 +39,32 @@ const swappedHands = generateExercise({...cfg, hands:"swap", seed:123458});
 const swappedPlan = exercisePlaybackPlan(swappedHands);
 assert.ok(swappedPlan.events.some((event) => event.part === "right"));
 assert.ok(swappedPlan.events.some((event) => event.part === "left"));
+
+for (let seed = 1; seed <= 120; seed++){
+  const beginner = generateExercise({...cfg, level:1,
+    difficulty:{pitchRange:0,keySignature:0,rhythm:0,texture:0,eyeHand:0,tempo:0},
+    hands:"both", lhPattern:"block", density:"long", seed});
+  for (const measure of beginner.measures){
+    for (const item of measure.bottom || []){
+      const notes = item.chordNotes?.length ? item.chordNotes : (item.note ? [item.note] : []);
+      if (notes.length) assert.ok(Math.max(...notes.map(dIdx)) - Math.min(...notes.map(dIdx)) <= 4,
+        "beginner left-hand shape stays within a fifth");
+    }
+  }
+}
+
+const fingerExercise = {clef:"treble", melodyOn:"top", measures:[{top:[0,1,2,3,4,5].map((letter) =>
+  ({rest:false, note:N(letter, 0, 4), dur:"q", clef:"treble"}))}]};
+const fingerHints = melodyFingering(fingerExercise);
+assert.deepEqual(fingerHints.entries.map((entry) => entry.finger), [1, 2, 3, 1, 2, 3]);
+assert.equal(fingerHints.entries[3].transition, "轉");
+const inPositionExercise = {clef:"treble", melodyOn:"top", measures:[{top:[0,1,0,1,2,1,0].map((letter) =>
+  ({rest:false, note:N(letter, 0, 4), dur:"q", clef:"treble"}))}]};
+assert.ok(melodyFingering(inPositionExercise).entries.every((entry) => !entry.transition),
+  "direction changes inside one five-finger position do not create false movement hints");
+
+const circleRoots = realize("circle_down", Key.fromId("C")).flat().map((chord) => noteName(chord.root));
+assert.deepEqual(circleRoots, ["C", "F", "B", "E", "A", "D", "G", "C"]);
 
 const fingerprint = fingerprintExercise(original);
 const reviewCfg = cfgFromFingerprint(fingerprint, {...cfg, seed:654321});

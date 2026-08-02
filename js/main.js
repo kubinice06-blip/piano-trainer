@@ -20,6 +20,7 @@ import { MidiInput } from "./input/midi.js";
 import { OnsetInput } from "./input/onset.js";
 import { PerformanceMatcher } from "./input/performance.js";
 import { buildTapEvents, pianoRange, pianoNoteName, TapSightMatcher } from "./drills/tap-piano.js";
+import { fingeringSummary } from "./fingering.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -312,6 +313,7 @@ function drawOpts(){
     showNames: $("shownames").checked,
     showHarmony: $("showharm").checked,
     showChords: $("showchords").checked,
+    showFingering: $("showfingering").checked,
     repeat: isLoop(),
     maxHeight: rowMaxHeight(),
     zoom: parseInt($("zoom").value, 10) / 100
@@ -378,11 +380,18 @@ function renderRead(){
   }
   $("sheetTitle").textContent = "視譜練習";
   $("sheetSub").textContent = describe(cur);
+  renderFingeringGuide(cur);
   $("answer").hidden = true;
   buildBeatStrip(cur.beats);
   renderReview();
   setupEyeMask();
   renderPracticePiano();
+}
+
+function renderFingeringGuide(ex){
+  const visible = state.mode === "read" && !!ex && $("showfingering").checked;
+  $("fingerguide").hidden = !visible;
+  $("fingerguide").textContent = visible ? fingeringSummary(ex) : "";
 }
 
 /* 段落結束：下一列升上來（它已經畫好了），舊的那一列拿去畫新的下一段。
@@ -424,6 +433,7 @@ function renderChord(){
   state.plans[0] = state.plan;
   state.layouts[0] = state.plan.layout;      // 游標要靠這個定位，忘了存就會卡在原點
   $("sheetTitle").textContent = "爵士和弦練習";
+  renderFingeringGuide(null);
   $("sheetSub").textContent = [
     d.label,
     VOICINGS[d.cfg.style] ? VOICINGS[d.cfg.style].label : d.cfg.style,
@@ -490,6 +500,7 @@ function openReview(i){
   $("stage").classList.add("reviewing");
   state.plan = paintRow(state.nowRow, ex, "回顧 · 第 " + (i + 1) + " 段");
   $("sheetSub").textContent = describe(ex);
+  renderFingeringGuide(ex);
   renderReview();
   renderPracticePiano();
 }
@@ -888,6 +899,7 @@ function openLibraryEntry(entry){
   $("stage").classList.add("reviewing");
   state.plan = paintRow(state.nowRow, ex, "複習清單 · " + entry.keyName);
   $("sheetSub").textContent = describe(ex);
+  renderFingeringGuide(ex);
   $("revback").hidden = false;
   $("review").hidden = false;
   syncMarkButton();
@@ -2210,7 +2222,7 @@ function bind(){
   // 換流程不必換題目 —— 只是重畫（反覆記號、預讀那一列）並歸零遍數
   $("flow").addEventListener("change", () => { syncFlow(); redraw(); });
   $("reps").addEventListener("change", () => { state.loopCount = 0; });
-  ["shownames", "showharm", "showchords"].forEach(id =>
+  ["shownames", "showharm", "showchords", "showfingering"].forEach(id =>
     $(id).addEventListener("change", () => { redraw(); updateRevealButton(); }));
 
   $("prog").addEventListener("change", () => { refreshChordKeys(); generate(); });

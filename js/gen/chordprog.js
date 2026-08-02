@@ -10,13 +10,11 @@ import { Key, cycleOfFourths } from "../core/key.js";
 import { CHORDS, resolveType, chordLabel, bassOctave } from "../core/chords.js";
 import { VOICINGS } from "./voicing.js";
 import { compPatterns, COMP_PATTERNS, ARPEGGIOS, isArpeggio } from "./comping.js";
-import { tsInfo } from "./rhythm.js";
+import { DUR, tsInfo } from "./rhythm.js";
 
 export const CHORD_STAGES = {
   guide:   {label:"第 1 · 導音骨架（根音＋3、7）", short:"導音骨架"},
-  seventh: {label:"第 2 · 七和弦（1、3、5、7）", short:"七和弦"},
-  ninth:   {label:"第 3 · 加九音（1、3、5、7、9）", short:"加九音"},
-  color:   {label:"第 4 · 可用外音（依和弦性質）", short:"可用外音"}
+  seventh: {label:"第 2 · 完整七和弦（1、3、5、7）", short:"七和弦"}
 };
 
 export const CHORD_CONTOURS = {
@@ -25,6 +23,55 @@ export const CHORD_CONTOURS = {
   updown:  {label:"上下行 · 越過八度再折返"},
   guide:   {label:"3–7 起步 · 先抓功能音"}
 };
+
+export const CHORD_RHYTHMS = {
+  eighth:     {label:"平均八分 · 均勻流動"},
+  quarter:    {label:"四分音符 · 一拍一音"},
+  longshort:  {label:"長短交錯 · ♩ ♪♪ ♩ ♪♪"},
+  dotted:     {label:"附點型 · ♩. ♪ ♩ ♪♪"},
+  syncopated: {label:"切分型 · 錯開強拍"},
+  offbeat:    {label:"反拍進入 · 先休止再彈"}
+};
+
+const RHYTHM_PATTERNS = {
+  eighth: {
+    4:[["8",0],["8",0],["8",0],["8",0],["8",0],["8",0],["8",0],["8",0]],
+    2:[["8",0],["8",0],["8",0],["8",0]]
+  },
+  quarter: {
+    4:[["q",0],["q",0],["q",0],["q",0]],
+    2:[["q",0],["q",0]]
+  },
+  longshort: {
+    4:[["q",0],["8",0],["8",0],["q",0],["8",0],["8",0]],
+    2:[["q",0],["8",0],["8",0]]
+  },
+  dotted: {
+    4:[["qd",0],["8",0],["q",0],["8",0],["8",0]],
+    2:[["qd",0],["8",0]]
+  },
+  syncopated: {
+    4:[["8",0],["q",0],["8",0],["q",0],["q",0]],
+    2:[["8",0],["q",0],["8",0]]
+  },
+  offbeat: {
+    4:[["8",1],["8",0],["q",0],["8",1],["8",0],["q",0]],
+    2:[["8",1],["8",0],["q",0]]
+  }
+};
+
+export function chordRhythmPattern(id, beats){
+  const pattern = RHYTHM_PATTERNS[id]?.[beats];
+  if (pattern) return pattern.map(cell => cell.slice());
+  return Array.from({length:Math.max(1, Math.round(beats * 2))}, () => ["8", 0]);
+}
+
+(function validateChordRhythms(){
+  Object.keys(CHORD_RHYTHMS).forEach(id => [2, 4].forEach(beats => {
+    const total = chordRhythmPattern(id, beats).reduce((sum, cell) => sum + DUR[cell[0]], 0);
+    if (Math.abs(total - beats) > 1e-9) throw new Error(`分解節奏 ${id}/${beats} 拍長度錯誤：${total}`);
+  }));
+})();
 
 /* 一格 = [距主音音程, 和弦類型]。一個小節放一格或兩格。 */
 const P = {
@@ -188,14 +235,11 @@ function colorIntervals(type){
 
 function uniqueIntervals(intervals){ return intervals.filter((v, i, a) => a.indexOf(v) === i); }
 
-function targetIntervals(type, stage){
+function targetIntervals(type, stage, extensions = false){
   const C = CHORDS[resolveType(type)];
   const core = uniqueIntervals(["P1", C.third, fifthOf(C), C.sev]);
-  if (stage === "guide") return uniqueIntervals(["P1", C.third, C.sev]);
-  if (stage === "seventh") return core;
-  const colors = colorIntervals(type);
-  if (stage === "ninth") return uniqueIntervals(core.concat(colors.find(x => /9$/.test(x)) || "M9"));
-  return uniqueIntervals(core.concat(colors));
+  const base = stage === "guide" ? uniqueIntervals(["P1", C.third, C.sev]) : core;
+  return extensions ? uniqueIntervals(base.concat(colorIntervals(type))) : base;
 }
 
 function notesForIntervals(root, intervals){
@@ -203,13 +247,14 @@ function notesForIntervals(root, intervals){
   return intervals.map(interval => iv(base, interval));
 }
 
-export function chordLesson(chord, stage = "seventh"){
+export function chordLesson(chord, stage = "seventh", extensions = false){
   const C = CHORDS[resolveType(chord.type)];
   const core = uniqueIntervals(["P1", C.third, fifthOf(C), C.sev]);
   const colors = colorIntervals(chord.type);
-  const target = targetIntervals(chord.type, stage);
+  const target = targetIntervals(chord.type, stage, extensions);
   return {
     label:chord.label,
+    extensions,
     coreDegrees:core.map(intervalDegree),
     colorDegrees:colors.map(intervalDegree),
     targetDegrees:target.map(intervalDegree),
@@ -231,11 +276,12 @@ function risingNotes(root, intervals, count){
   return out;
 }
 
-function arpeggioLine(chord, stage, contour, count){
-  let intervals = targetIntervals(chord.type, stage);
+function arpeggioLine(chord, stage, extensions, contour, count){
+  let intervals = targetIntervals(chord.type, stage, extensions);
   if (contour === "guide"){
     const C = CHORDS[resolveType(chord.type)];
-    intervals = uniqueIntervals([C.third, C.sev].concat(colorIntervals(chord.type), fifthOf(C), "P1"));
+    intervals = uniqueIntervals([C.third, C.sev].concat(intervals.filter(interval =>
+      interval !== C.third && interval !== C.sev)));
   }
   if (contour === "down") return risingNotes(chord.root, intervals, count).reverse();
   if (contour === "updown"){
@@ -256,7 +302,7 @@ function durationForBeats(beats){
 
 /**
  * 和弦代號反應練習：左手只給根音，右手由代號推算骨架與外音後分解。
- * @param cfg {prog, order, fixed, count, stage, contour, ts, seed}
+ * @param cfg {prog, order, fixed, count, stage, extensions, contour, rhythm, ts, seed}
  */
 export function generateChordDrill(cfg){
   const seed = (cfg.seed === undefined || cfg.seed === null) ? randomSeed() : cfg.seed;
@@ -285,11 +331,13 @@ export function generateChordDrill(cfg){
   }
 
   const stage = CHORD_STAGES[cfg.stage] ? cfg.stage : "seventh";
+  const extensions = !!cfg.extensions;
   const contour = CHORD_CONTOURS[cfg.contour] ? cfg.contour : "up";
+  const rhythm = CHORD_RHYTHMS[cfg.rhythm] ? cfg.rhythm : "eighth";
 
   const systems = tonics.map(key => {
     const bars = realize(cfg.prog, key);
-    const lessons = bars.flat().map(chord => chordLesson(chord, stage));
+    const lessons = bars.flat().map(chord => chordLesson(chord, stage, extensions));
 
     const measures = bars.map((bar) => {
       const perBar = bar.length;
@@ -299,16 +347,21 @@ export function generateChordDrill(cfg){
 
       bar.forEach((c, ci) => {
         labels.push({label: c.label, beat: ci * (beats / perBar)});
-        const count = Math.max(2, Math.round(cellBeats * 2));
-        arpeggioLine(c, stage, contour, count).forEach(note =>
-          top.push({rest:false, note, dur:"8", clef:"treble"}));
+        const pattern = chordRhythmPattern(rhythm, cellBeats);
+        const count = pattern.filter(cell => !cell[1]).length;
+        const line = arpeggioLine(c, stage, extensions, contour, count);
+        let noteIndex = 0;
+        pattern.forEach(([dur, rest]) => {
+          if (rest) top.push({rest:true, dur, clef:"treble"});
+          else top.push({rest:false, note:line[noteIndex++], dur, clef:"treble"});
+        });
         const bass = N(c.root.l, c.root.a, bassOctave(c.root));
         bottom.push({rest:false, note:bass, dur:durationForBeats(cellBeats), clef:"bass"});
       });
 
       return {top, bottom: bottom.length ? bottom : null, labels,
               label:bar.map(c => c.label).join(" → "),
-              names:bar.map(c => chordLesson(c, stage).targetNotes.join(" – ")),
+              names:bar.map(c => chordLesson(c, stage, extensions).targetNotes.join(" – ")),
               chords: bar};
     });
 
@@ -317,7 +370,7 @@ export function generateChordDrill(cfg){
 
   return {
     seed, cfg, systems,
-    stage, contour, prog: cfg.prog, ts, beats,
+    stage, extensions, contour, rhythm, prog: cfg.prog, ts, beats,
     grand:true,
     label: spec.label,
     createdAt: Date.now()

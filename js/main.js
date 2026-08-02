@@ -7,7 +7,7 @@ import { Metro } from "./audio/metro.js";
 import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY, FOCUS, INVERSIONS,
          availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
 import { PROGRESSIONS, generateChordDrill, progressionCategories,
-         CHORD_STAGES, CHORD_CONTOURS } from "./gen/chordprog.js";
+         CHORD_STAGES, CHORD_CONTOURS, CHORD_RHYTHMS } from "./gen/chordprog.js";
 import { MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, cycleOfFourths } from "./core/key.js";
 import { Stream } from "./stream.js";
 import { Library } from "./library.js";
@@ -205,6 +205,15 @@ function fillProgressions(){
     contour.appendChild(o);
   });
   contour.value = "up";
+
+  const rhythm = $("chordrhythm");
+  Object.keys(CHORD_RHYTHMS).forEach(id => {
+    const o = document.createElement("option");
+    o.value = id;
+    o.textContent = CHORD_RHYTHMS[id].label;
+    rhythm.appendChild(o);
+  });
+  rhythm.value = "eighth";
 }
 
 function refreshChordKeys(){
@@ -396,12 +405,14 @@ function renderChordCoach(drill){
     seen.add(item.label); return true;
   });
   const showActual = state.revealed && $("shownotes").checked;
+  const extensionLabel = drill.extensions ? "外音開啟" : "外音關閉";
   box.innerHTML =
     '<div class="chord-coach-head"><b>讀法：根音 → 3、7 → 外音 → 分解</b><span>' +
-      esc(CHORD_STAGES[drill.stage].short + " · " + CHORD_CONTOURS[drill.contour].label) + '</span></div>' +
+      esc(CHORD_STAGES[drill.stage].short + " · " + extensionLabel + " · " + CHORD_RHYTHMS[drill.rhythm].label) + '</span></div>' +
     '<div class="chord-coach-cards">' + lessons.map(item =>
       '<div class="chord-card"><strong>' + esc(item.label) + '</strong>' +
-      '<span>目標 ' + esc(item.targetDegrees.join("–")) + '　可用外音 ' + esc(item.colorDegrees.join("、")) + '</span>' +
+      '<span>目標 ' + esc(item.targetDegrees.join("–")) + '　' +
+        (drill.extensions ? '加入外音 ' + esc(item.colorDegrees.join("、")) : '七以上外音關閉') + '</span>' +
       '<span class="actual">' + (showActual ? esc(item.targetNotes.join(" · ")) : '先從代號推算，按「看答案」核對') + '</span></div>'
     ).join("") + '</div>';
   box.hidden = false;
@@ -451,7 +462,9 @@ function renderChord(){
   $("sheetSub").textContent = [
     d.label,
     CHORD_STAGES[d.stage].short,
+    d.extensions ? "外音開啟" : "外音關閉",
     CHORD_CONTOURS[d.contour].label,
+    CHORD_RHYTHMS[d.rhythm].label,
     "左手根音＋右手分解",
     d.systems.map(s => s.tonic.shortName).join(" → "),
     "#" + d.seed.toString(36)
@@ -1736,14 +1749,10 @@ function stopCursor(){
 
 function renderAnswerBox(){
   const box = $("answer");
-  if (state.mode !== "chord" || !state.revealed){ box.hidden = true; return; }
-  box.innerHTML = state.drill.systems.map(s =>
-    '<div><span class="dim">' + s.tonic.shortName + '&nbsp;&nbsp;</span>' +
-    s.measures.map(m => "<b>" + m.label + "</b> " + m.names)
-              .join('<span class="dim">&nbsp; │ &nbsp;</span>') +
-    "</div>"
-  ).join("");
-  box.hidden = false;
+  // 和弦拆解卡與揭曉後的譜面已經同時提供級數、音名與實際節奏；
+  // 舊答案列只會重複資訊並吃掉 iPad 橫向時最珍貴的譜面高度。
+  box.innerHTML = "";
+  box.hidden = true;
 }
 
 function redraw(){
@@ -1831,7 +1840,9 @@ function generate(opts){
       fixed: $("kfixed").value,
       count: parseInt($("ncyc").value, 10),
       stage: $("chordstage").value,
+      extensions: $("chordextensions").checked,
       contour: $("chordcontour").value,
+      rhythm: $("chordrhythm").value,
       ts: "4/4",
       seed: (o.sameSeed && state.drill) ? state.drill.seed : undefined
     };
@@ -2240,7 +2251,7 @@ function bind(){
     $(id).addEventListener("change", () => { redraw(); updateRevealButton(); }));
 
   $("prog").addEventListener("change", () => { refreshChordKeys(); generate(); });
-  ["korder", "kfixed", "ncyc", "chordstage", "chordcontour"].forEach(id =>
+  ["korder", "kfixed", "ncyc", "chordstage", "chordextensions", "chordcontour", "chordrhythm"].forEach(id =>
     $(id).addEventListener("change", () => generate()));
   $("swing").addEventListener("input", function(){
     const v = parseInt(this.value, 10) / 100;

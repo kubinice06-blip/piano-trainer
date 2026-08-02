@@ -204,9 +204,14 @@
         <label for="chordstage">練習層次<small class="hint">從和弦代號推算要彈的音</small></label>
         <select id="chordstage"></select>
       </div>
+      <label class="check"><input type="checkbox" id="chordextensions"> 加入 9、11、13 等七和弦以上外音</label>
       <div class="field">
         <label for="chordcontour">分解路線<small class="hint">左手彈根音，右手依路線分解</small></label>
         <select id="chordcontour"></select>
+      </div>
+      <div class="field">
+        <label for="chordrhythm">分解節奏<small class="hint">同一組和弦音，改變落點與長短</small></label>
+        <select id="chordrhythm"></select>
       </div>
       <div class="field">
         <label for="swing">Swing <span id="swingread">平均八分</span></label>
@@ -425,6 +430,6 @@
 <!-- 拼頁列印用；平常不顯示，只有列印練習單時才排進頁面 -->
 <div class="printsheet" id="sheetout" hidden></div>
 
-<script type="module" src="js/main.js?v=14"></script>
+<script type="module" src="js/main.js?v=16"></script>
 </body>
 </html>

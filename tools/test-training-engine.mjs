@@ -9,7 +9,8 @@ import { playbackVoiceProfile } from "../js/audio/sound.js";
 import { melodyFingering } from "../js/fingering.js";
 import { N, dIdx, noteName } from "../js/core/pitch.js";
 import { Key } from "../js/core/key.js";
-import { realize, generateChordDrill } from "../js/gen/chordprog.js";
+import { realize, generateChordDrill, CHORD_RHYTHMS, chordRhythmPattern } from "../js/gen/chordprog.js";
+import { DUR } from "../js/gen/rhythm.js";
 
 assert.equal(AXES.length, 6);
 const highRhythm = stepVector(normaliseVector(null, 2), "rhythm", "up");
@@ -78,7 +79,7 @@ const circleRoots = realize("circle_down", Key.fromId("C")).flat().map((chord) =
 assert.deepEqual(circleRoots, ["C", "F", "B", "E", "A", "D", "G", "C"]);
 
 const chordSymbolDrill = generateChordDrill({prog:"ii_V_I", order:"single", fixed:"C", count:1,
-  stage:"color", contour:"up", ts:"4/4", seed:1});
+  stage:"seventh", extensions:true, contour:"up", rhythm:"eighth", ts:"4/4", seed:1});
 assert.equal(chordSymbolDrill.grand, true);
 assert.equal(chordSymbolDrill.systems[0].measures[0].top.length, 8,
   "right hand receives an eighth-note arpeggio line");
@@ -87,9 +88,21 @@ assert.equal(chordSymbolDrill.systems[0].measures[0].bottom.length, 1,
 assert.deepEqual(chordSymbolDrill.systems[0].lessons[0].targetDegrees, ["1", "♭3", "5", "♭7", "9", "11"]);
 assert.deepEqual(chordSymbolDrill.systems[0].lessons[0].targetNotes, ["D", "F", "A", "C", "E", "G"]);
 const alteredDominantDrill = generateChordDrill({prog:"ii_V_i", order:"single", fixed:"Am", count:1,
-  stage:"color", contour:"guide", ts:"4/4", seed:2});
+  stage:"seventh", extensions:true, contour:"guide", rhythm:"syncopated", ts:"4/4", seed:2});
 assert.ok(alteredDominantDrill.systems[0].lessons[1].colorDegrees.includes("♭9"),
   "an explicitly altered dominant teaches the alteration written in its chord symbol");
+for (const rhythm of Object.keys(CHORD_RHYTHMS)){
+  for (const beats of [2, 4]){
+    const total = chordRhythmPattern(rhythm, beats).reduce((sum, cell) => sum + DUR[cell[0]], 0);
+    assert.equal(total, beats, `${rhythm} fills a ${beats}-beat chord cell exactly`);
+  }
+}
+const offbeatDrill = generateChordDrill({prog:"ii_V_I_2", order:"single", fixed:"C", count:1,
+  stage:"guide", extensions:false, contour:"updown", rhythm:"offbeat", ts:"4/4", seed:3});
+assert.ok(offbeatDrill.systems[0].measures.every(measure =>
+  measure.top.reduce((sum, item) => sum + DUR[item.dur], 0) === 4));
+assert.ok(offbeatDrill.systems[0].measures.some(measure => measure.top.some(item => item.rest)),
+  "offbeat arpeggios contain written rests before the entries");
 
 const fingerprint = fingerprintExercise(original);
 const reviewCfg = cfgFromFingerprint(fingerprint, {...cfg, seed:654321});

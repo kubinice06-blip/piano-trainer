@@ -3,6 +3,14 @@
 
 export function mtof(m){ return 440 * Math.pow(2, (m - 69) / 12); }
 
+export function playbackVoiceProfile(event, noteIndex = 0){
+  const left = event?.part === "left";
+  return {
+    velocity:Math.max(0.10, (left ? 0.31 : 0.24) - noteIndex * 0.028),
+    tone:left ? "bass" : "piano",
+  };
+}
+
 export const Audio = {
   ac: null,
   master: null,
@@ -148,19 +156,20 @@ export const Audio = {
   },
 
   /* 一個音：三個泛音 + 低通衰減，模擬鋼琴被敲擊後的亮度下降 */
-  voice(freq, t, dur, vel){
+  voice(freq, t, dur, vel, tone = "piano"){
     var ac = this.ac;
+    var bass = tone === "bass";
     var g = ac.createGain();
     var f = ac.createBiquadFilter();
     f.type = "lowpass"; f.Q.value = 0.5;
-    f.frequency.setValueAtTime(Math.min(11000, freq * 9), t);
+    f.frequency.setValueAtTime(Math.min(11000, freq * (bass ? 14 : 9)), t);
     f.frequency.exponentialRampToValueAtTime(Math.max(320, freq * 2.4), t + Math.min(1.4, dur + 0.3));
 
     var o1 = ac.createOscillator(); o1.type = "triangle"; o1.frequency.value = freq;
     var o2 = ac.createOscillator(); o2.type = "sine";     o2.frequency.value = freq * 2;
     var o3 = ac.createOscillator(); o3.type = "sine";     o3.frequency.value = freq * 3.01;
-    var g2 = ac.createGain(); g2.gain.value = 0.20;
-    var g3 = ac.createGain(); g3.gain.value = 0.06;
+    var g2 = ac.createGain(); g2.gain.value = bass ? 0.34 : 0.20;
+    var g3 = ac.createGain(); g3.gain.value = bass ? 0.11 : 0.06;
 
     var peak = Math.max(0.015, vel);
     var tail = Math.max(0.30, dur * 0.75);
@@ -203,7 +212,8 @@ export const Audio = {
       var t = t0 + beat * spb;
       var dur = Math.max(0.10, ev.d * spb * 0.90);
       for (var i = 0; i < ev.midi.length; i++){
-        self.voice(mtof(ev.midi[i]), t, dur, 0.26 - i * 0.035);
+        var profile = playbackVoiceProfile(ev, i);
+        self.voice(mtof(ev.midi[i]), t, dur, profile.velocity, profile.tone);
       }
       if (ev.gid && onNote){
         self.timers.push(setTimeout(function(){ onNote(ev.gid); },

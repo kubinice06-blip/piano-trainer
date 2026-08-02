@@ -7,7 +7,7 @@
  *     VexFlow 有 0.95 MB，而且幾乎不會變，沒必要每次都上網要。
  */
 
-const VERSION = "putai-v8";
+const VERSION = "putai-v10";
 const ASSETS = [
   "./",
   "./index.html",
@@ -23,6 +23,7 @@ const ASSETS = [
   "./js/input/midi.js",
   "./js/input/onset.js",
   "./js/input/performance.js",
+  "./js/drills/tap-piano.js",
   "./js/core/rng.js",
   "./js/core/pitch.js",
   "./js/core/key.js",

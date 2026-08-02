@@ -106,7 +106,44 @@ function buildNote(item, key){
   return n;
 }
 
-function collectPlan(plan, items, vfnotes, base){
+function playbackEvents(items, base, part, measure){
+  var events = [], t = base;
+  for (var i = 0; i < items.length; i++){
+    var it = items[i], d = DUR[it.dur];
+    if (!it.rest){
+      var src = (it.chordNotes && it.chordNotes.length) ? it.chordNotes : [it.note];
+      events.push({t:t, d:d, midi:src.map(midiOf), part:part, measure:measure, item:i, gid:null});
+    }
+    t += d;
+  }
+  return events;
+}
+
+/* 解答音直接由題目資料建立，不再依賴「該聲部是否成功畫到 SVG」。
+   這讓左右手是可測試的播放資料；iPad 上即使繪圖降級，也不會只剩右手有聲。 */
+export function exercisePlaybackPlan(ex){
+  var plan = {events:[], total:ex.measures.length * ex.beats, layout:[]};
+  for (var mi = 0; mi < ex.measures.length; mi++){
+    var md = ex.measures[mi];
+    var topPart = ex.clef === "bass" ? "left" : "right";
+    plan.events.push.apply(plan.events, playbackEvents(md.top || [], mi * ex.beats, topPart, mi));
+    if (md.bottom) plan.events.push.apply(plan.events, playbackEvents(md.bottom, mi * ex.beats, "left", mi));
+  }
+  return plan;
+}
+
+function attachPlanGids(plan, vfnotes, part, measure){
+  for (var i = 0; i < vfnotes.length; i++){
+    var gid = null;
+    try { gid = "vf-" + vfnotes[i].getAttribute("id"); } catch (e) {}
+    var event = plan.events.find(function(item){
+      return item.part === part && item.measure === measure && item.item === i;
+    });
+    if (event) event.gid = gid;
+  }
+}
+
+function collectPlan(plan, items, vfnotes, base, part){
   var t = base;
   for (var i = 0; i < items.length; i++){
     var it = items[i], d = DUR[it.dur];
@@ -114,7 +151,7 @@ function collectPlan(plan, items, vfnotes, base){
       var gid = null;
       try { gid = "vf-" + vfnotes[i].getAttribute("id"); } catch (e) {}
       var src = (it.chordNotes && it.chordNotes.length) ? it.chordNotes : [it.note];
-      plan.events.push({t:t, d:d, midi: src.map(midiOf), gid:gid});
+      plan.events.push({t:t, d:d, midi:src.map(midiOf), gid:gid, part:part || "right"});
     }
     t += d;
   }
@@ -126,7 +163,7 @@ function collectPlan(plan, items, vfnotes, base){
  */
 export function drawExercise(el, ex, opts){
   el.innerHTML = "";
-  var plan = {events:[], total: ex.measures.length * ex.beats, layout:[]};
+  var plan = exercisePlaybackPlan(ex);
   if (!VF) return plan;
 
   var o = opts || {};
@@ -241,8 +278,8 @@ export function drawExercise(el, ex, opts){
       vTop.draw(ctx, st);
       if (vBot) vBot.draw(ctx, sb);
 
-      collectPlan(plan, md.top, topNotes, mi * ex.beats);
-      if (botNotes && md.bottom) collectPlan(plan, md.bottom, botNotes, mi * ex.beats);
+      attachPlanGids(plan, topNotes, ex.clef === "bass" ? "left" : "right", mi);
+      if (botNotes && md.bottom) attachPlanGids(plan, botNotes, "left", mi);
 
       plan.layout.push({
         bar: mi, x: st.getX(), y: st.getY(), w: w,
@@ -398,8 +435,8 @@ export function drawChordDrill(el, data, opts){
         }
 
         // 播放計畫不管有沒有畫出來都要有 —— 藏答案時也要能按播放
-        collectPlan(plan, md.top, topNotes || [], tBase);
-        if (md.bottom) collectPlan(plan, md.bottom, botNotes || [], tBase);
+        collectPlan(plan, md.top, topNotes || [], tBase, data.grand ? "right" : "left");
+        if (md.bottom) collectPlan(plan, md.bottom, botNotes || [], tBase, "left");
         plan.total = Math.max(plan.total, tBase + beats);
         plan.layout.push({bar: plan.layout.length, x: st.getX(), y: st.getY(), w: w,
                           h: (sb ? sb.getBottomY() : st.getBottomY()) - st.getY()});

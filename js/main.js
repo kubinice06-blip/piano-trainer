@@ -2,7 +2,7 @@
 
 import { loadVexFlow } from "./render/vexloader.js";
 import { drawExercise, drawChordDrill } from "./render/score.js";
-import { Audio } from "./audio/sound.js";
+import { Audio, mtof } from "./audio/sound.js";
 import { Metro } from "./audio/metro.js";
 import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY, FOCUS, INVERSIONS,
          availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
@@ -19,6 +19,7 @@ import { noteName, midiOf } from "./core/pitch.js";
 import { MidiInput } from "./input/midi.js";
 import { OnsetInput } from "./input/onset.js";
 import { PerformanceMatcher } from "./input/performance.js";
+import { buildTapEvents, pianoRange, pianoNoteName, TapSightMatcher } from "./drills/tap-piano.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -49,9 +50,11 @@ const state = {
   flashTimer: null,
   matcher: null,
   inputMode: null,
+  practicePianoOpen: false,
   micro: {
-    open:false, kind:"note", item:null, startedAt:0, attempts:0, correct:0, lessonOwned:false,
+    open:false, kind:"piano", item:null, startedAt:0, attempts:0, correct:0, lessonOwned:false,
     endsAt:0, timer:null, roundTimer:null, rhythmMatcher:null,
+    tapMatcher:null, tapTimer:null, tapStartMs:0, tapEndMs:0, tapCurrentId:null,
   },
   lesson: null,
   weekly: null,
@@ -379,6 +382,7 @@ function renderRead(){
   buildBeatStrip(cur.beats);
   renderReview();
   setupEyeMask();
+  renderPracticePiano();
 }
 
 /* 段落結束：下一列升上來（它已經畫好了），舊的那一列拿去畫新的下一段。
@@ -398,6 +402,7 @@ function advanceSegment(barsDone){
   } else {
     renderRead();
   }
+  renderPracticePiano();
   logCurrent();
 }
 
@@ -429,6 +434,7 @@ function renderChord(){
   ].filter(Boolean).join(" · ");
   renderAnswerBox();
   buildBeatStrip(4);
+  renderPracticePiano();
 }
 
 /* ---------- 本次練習的段落存檔 ---------- */
@@ -485,6 +491,7 @@ function openReview(i){
   state.plan = paintRow(state.nowRow, ex, "回顧 · 第 " + (i + 1) + " 段");
   $("sheetSub").textContent = describe(ex);
   renderReview();
+  renderPracticePiano();
 }
 
 function exitReview(){
@@ -884,6 +891,7 @@ function openLibraryEntry(entry){
   $("revback").hidden = false;
   $("review").hidden = false;
   syncMarkButton();
+  renderPracticePiano();
   setDrawer(false);
 }
 
@@ -908,20 +916,268 @@ function practiceWeakness(id = null){
 /* ---------- P9：90 秒微練習 ---------- */
 
 const MICRO_LEVEL_KEY = "putai.micro.level";
+const TAP_HAND_KEY = "putai.tap.hand";
+const TAP_LABELS_KEY = "putai.tap.labels";
 
 function microLevel(){
   return Math.max(1, Math.min(6, parseInt($("microlevel")?.value, 10) || 3));
 }
 
 function restoreMicroLevel(){
-  try { $("microlevel").value = String(Math.max(1, Math.min(6, Number(localStorage.getItem(MICRO_LEVEL_KEY)) || 3))); }
-  catch { $("microlevel").value = "3"; }
+  try {
+    $("microlevel").value = String(Math.max(1, Math.min(6, Number(localStorage.getItem(MICRO_LEVEL_KEY)) || 3)));
+    $("taphand").value = localStorage.getItem(TAP_HAND_KEY) === "lh" ? "lh" : "rh";
+    $("taplabels").checked = localStorage.getItem(TAP_LABELS_KEY) === "1";
+  } catch {
+    $("microlevel").value = "3";
+    $("taphand").value = "rh";
+    $("taplabels").checked = false;
+  }
 }
 
 function melodyNotes(ex){
   const side = ex.melodyOn === "bottom" ? "bottom" : "top";
   return ex.measures.flatMap((measure) => measure[side] || measure.top || [])
     .filter((item) => !item.rest && item.note);
+}
+
+function tapHand(){ return $("taphand")?.value === "lh" ? "lh" : "rh"; }
+
+function buildTapExercise(){
+  const level = microLevel();
+  const density = ["long", "quarter", "eighth", "varied", "16th", "16th"][level - 1];
+  const difficulty = presetVector(level);
+  // The pitch challenge still grows, but the on-screen keyboard stays within
+  // a comfortable two-octave hand area on an iPad.
+  difficulty.pitchRange = Math.min(3, difficulty.pitchRange);
+  difficulty.texture = 0;
+  difficulty.eyeHand = 0;
+  let best = null;
+  for (let tries = 0; tries < 30; tries++){
+    const ex = generateExercise({
+      ...readCfg(), level, difficulty, bars:2, hands:tapHand(), lhPattern:null,
+      density, focus:"none", seed:undefined,
+    });
+    const notes = melodyNotes(ex).map((item) => midiOf(item.note));
+    const range = pianoRange([{midi:notes}]);
+    if (!notes.length) continue;
+    const score = range.whiteCount * 100 + (Math.max(...notes) - Math.min(...notes));
+    if (!best || score < best.score) best = {ex, score};
+    if (notes.length >= 4 && range.whiteCount <= 15) return ex;
+  }
+  return best.ex;
+}
+
+function clearTapScoreClasses(){
+  $("microscore").querySelectorAll(".tap-current,.tap-hit,.tap-missed")
+    .forEach((element) => element.classList.remove("tap-current", "tap-hit", "tap-missed"));
+}
+
+function tapEventElements(event){
+  return (event?.gids || []).map((id) => document.getElementById(id)).filter(Boolean);
+}
+
+function paintTapProgress(now = performance.now()){
+  const matcher = state.micro.tapMatcher;
+  if (!matcher) return;
+  clearTapScoreClasses();
+  matcher.events.forEach((event) => {
+    const className = event.status === "hit" ? "tap-hit" : (event.status === "missed" ? "tap-missed" : null);
+    if (className) tapEventElements(event).forEach((element) => element.classList.add(className));
+  });
+  const current = matcher.current(now, 620);
+  if (current?.status === "pending") tapEventElements(current).forEach((element) => element.classList.add("tap-current"));
+}
+
+function stopTapPiano(clear = true){
+  clearInterval(state.micro.tapTimer);
+  clearTimeout(state.micro.roundTimer);
+  state.micro.tapTimer = null;
+  state.micro.roundTimer = null;
+  state.micro.tapMatcher = null;
+  if (clear) clearTapScoreClasses();
+}
+
+function renderPianoKeyboard(events){
+  renderKeyboard($("pianokeys"), $("pianoscroll"), events, $("taplabels").checked, tapPianoKey);
+}
+
+function renderKeyboard(host, scroll, events, showAll, onPointerDown){
+  const range = pianoRange(events);
+  host.innerHTML = "";
+  host.style.setProperty("--white-count", String(range.whiteCount));
+  host.style.setProperty("--piano-min-width", `${Math.max(420, range.whiteCount * 46)}px`);
+  for (const key of range.keys){
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `piano-key ${key.black ? "black" : "white"}`;
+    button.dataset.midi = String(key.midi);
+    button.setAttribute("aria-label", key.name);
+    if (key.black) button.style.setProperty("--slot", String(key.slot));
+    button.textContent = showAll || key.name.startsWith("C") ? key.name : "";
+    button.addEventListener("pointerdown", onPointerDown);
+    host.appendChild(button);
+  }
+  scroll.scrollLeft = 0;
+  return range;
+}
+
+const PRACTICE_PIANO_KEY = "putai.practice.piano.open";
+
+function renderPracticePiano(){
+  if (!state.practicePianoOpen) return;
+  const events = state.plan?.events || [];
+  const range = renderKeyboard($("practicepianokeys"), $("practicepianoscroll"), events, false, tapPracticePianoKey);
+  $("practicepianorange").textContent = `${pianoNoteName(range.start)}–${pianoNoteName(range.end)} · 音域較寬時可左右滑動`;
+}
+
+function tapPracticePianoKey(event){
+  event.preventDefault();
+  const button = event.currentTarget;
+  const midi = Number(button.dataset.midi);
+  const ac = Audio.ctx();
+  if (ac) Audio.voice(mtof(midi), ac.currentTime, 0.32, midi < 60 ? 0.31 : 0.24, midi < 60 ? "bass" : "piano");
+  flashPianoKey(button);
+}
+
+function setPracticePiano(open, redrawScore = true){
+  state.practicePianoOpen = !!open;
+  $("practicepiano").hidden = !state.practicePianoOpen;
+  $("togglepracticepiano").setAttribute("aria-expanded", state.practicePianoOpen ? "true" : "false");
+  try { localStorage.setItem(PRACTICE_PIANO_KEY, state.practicePianoOpen ? "1" : "0"); } catch {}
+  if (state.practicePianoOpen) renderPracticePiano();
+  if (redrawScore) requestAnimationFrame(redraw);
+}
+
+function restorePracticePiano(){
+  let open = false;
+  try { open = localStorage.getItem(PRACTICE_PIANO_KEY) === "1"; } catch {}
+  setPracticePiano(open, false);
+}
+
+function renderTapPiano(){
+  stopTapPiano();
+  const ex = buildTapExercise();
+  const plan = drawExercise($("microscore"), ex, {
+    showNames:false, showHarmony:false, showChords:false, zoom:1.05, perLine:2, maxHeight:210,
+  });
+  const events = buildTapEvents(plan);
+  const bpm = generatorLevels(presetVector(microLevel())).bpm;
+  state.micro.item = {kind:"piano", ex, plan, events, bpm};
+  state.micro.attempts = 0;
+  state.micro.correct = 0;
+  $("microquestion").textContent = `${tapHand() === "lh" ? "左手低音譜" : "右手高音譜"} · ${ex.key.displayName} · ${ex.ts} · ♩=${bpm} · 共 ${events.length} 個音`;
+  $("microstats").textContent = `0 / ${events.length}`;
+  $("tapstatus").textContent = "按開始後先聽一小節預備拍";
+  $("tapstart").disabled = events.length === 0;
+  $("tapstart").textContent = "開始跟拍";
+  $("microfeedback").textContent = "每個音都要按；按錯不會跳過，拍點過了才算漏音。";
+  $("microfeedback").style.color = "#8A6520";
+  renderPianoKeyboard(events);
+}
+
+function startTapPiano(){
+  const item = state.micro.item;
+  if (!state.micro.open || item?.kind !== "piano" || !item.events.length) return;
+  stopTapPiano();
+  if (!Metro.ensure()){
+    $("microfeedback").textContent = "點一下畫面啟用音訊後再試。";
+    return;
+  }
+  const secondsPerBeat = 60 / item.bpm;
+  const countIn = item.ex.beats || 4;
+  const audioStart = Metro.ac.currentTime + 0.18;
+  const totalClicks = Math.ceil(countIn + item.plan.total);
+  for (let beat = 0; beat < totalClicks; beat++) Metro._click(audioStart + beat * secondsPerBeat, beat % countIn === 0);
+  const startMs = performance.now() + (audioStart - Metro.ac.currentTime + countIn * secondsPerBeat) * 1000;
+  const windowMs = Math.max(260, Math.min(500, secondsPerBeat * 1000 * 0.48));
+  state.micro.tapMatcher = new TapSightMatcher(item.events, item.bpm, startMs, windowMs);
+  state.micro.tapStartMs = startMs;
+  state.micro.tapEndMs = startMs + item.plan.total * secondsPerBeat * 1000;
+  $("tapstart").disabled = true;
+  $("tapstatus").textContent = "預備拍…手先放在小鋼琴上";
+  $("microfeedback").textContent = "先看譜，正拍開始後跟著節奏按鍵。";
+  state.micro.tapTimer = setInterval(updateTapPiano, 40);
+  state.micro.roundTimer = setTimeout(finishTapPiano,
+    Math.max(0, state.micro.tapEndMs - performance.now()) + windowMs + 100);
+  paintTapProgress(startMs - 1);
+}
+
+function updateTapPiano(){
+  const matcher = state.micro.tapMatcher;
+  if (!matcher) return;
+  const now = performance.now();
+  matcher.tick(now);
+  paintTapProgress(now);
+  if (now < state.micro.tapStartMs){
+    const left = Math.max(1, Math.ceil((state.micro.tapStartMs - now) / 1000));
+    $("tapstatus").textContent = `預備拍 · ${left}`;
+    return;
+  }
+  const done = matcher.events.filter((event) => event.status !== "pending").length;
+  const hit = matcher.events.filter((event) => event.status === "hit").length;
+  $("microstats").textContent = `${hit} / ${matcher.events.length}`;
+  $("tapstatus").textContent = `進行中 · 第 ${Math.min(done + 1, matcher.events.length)} / ${matcher.events.length} 音`;
+}
+
+function flashPianoKey(button, className){
+  button.classList.add("is-pressed");
+  if (className) button.classList.add(className);
+  setTimeout(() => {
+    button.classList.remove("is-pressed");
+    if (className) button.classList.remove(className);
+  }, 150);
+}
+
+function tapPianoKey(event){
+  event.preventDefault();
+  const button = event.currentTarget;
+  const midi = Number(button.dataset.midi);
+  const ac = Audio.ctx();
+  if (ac) Audio.voice(mtof(midi), ac.currentTime, 0.22, 0.16);
+  const matcher = state.micro.tapMatcher;
+  if (!matcher){
+    flashPianoKey(button);
+    $("microfeedback").textContent = `這是 ${pianoNoteName(midi)}；準備好再按「開始跟拍」。`;
+    return;
+  }
+  const now = performance.now();
+  if (now < state.micro.tapStartMs - matcher.windowMs){
+    flashPianoKey(button);
+    $("microfeedback").textContent = "還在預備拍；可以先把手放好，正拍開始才計分。";
+    $("microfeedback").style.color = "#8A6520";
+    return;
+  }
+  const result = matcher.tap(midi, now);
+  flashPianoKey(button, result.correct ? "is-correct" : "is-wrong");
+  $("microfeedback").textContent = result.correct
+    ? `正確 · ${result.target.errorMs >= 0 ? "+" : ""}${Math.round(result.target.errorMs)}ms`
+    : "音高不對，這一拍還沒過可以立刻改按。";
+  $("microfeedback").style.color = result.correct ? "#2D6A45" : "#A33A2B";
+  paintTapProgress();
+}
+
+function finishTapPiano(){
+  const matcher = state.micro.tapMatcher;
+  if (!matcher) return;
+  clearInterval(state.micro.tapTimer);
+  state.micro.tapTimer = null;
+  const result = matcher.result(state.micro.tapEndMs + matcher.windowMs + 1);
+  paintTapProgress(state.micro.tapEndMs);
+  state.micro.tapMatcher = null;
+  $("microstats").textContent = `${result.correct} / ${result.expected}`;
+  $("tapstatus").textContent = `完成 · 命中 ${Math.round(result.accuracy * 100)}%`;
+  $("tapstart").disabled = false;
+  $("tapstart").textContent = "再練同一段";
+  $("microfeedback").textContent = `答對 ${result.correct}/${result.expected} · 漏 ${result.missed} · 按錯 ${result.wrongTaps}` +
+    (result.medianTimingMs == null ? "" : ` · 拍點中位誤差 ${Math.round(result.medianTimingMs)}ms`);
+  $("microfeedback").style.color = result.rating === "smooth" ? "#2D6A45" : "#8A6520";
+  Library.recordDrill("tap-piano", {
+    correct:result.rating !== "collapse", responseMs:result.medianTimingMs || 0, rating:result.rating,
+    details:{accuracy:result.accuracy, expected:result.expected, missed:result.missed,
+      wrongTaps:result.wrongTaps, hand:tapHand(), level:microLevel(), bpm:state.micro.item.bpm},
+  });
+  renderLibrary();
 }
 
 function buildMicroItem(kind){
@@ -983,6 +1239,10 @@ function buildMicroItem(kind){
 
 function renderMicro(){
   const micro = state.micro;
+  if (micro.kind === "piano"){
+    renderTapPiano();
+    return;
+  }
   clearTimeout(micro.roundTimer);
   micro.roundTimer = null;
   micro.rhythmMatcher = null;
@@ -1028,7 +1288,7 @@ function startMicroClock(seconds = 90){
   state.micro.timer = setInterval(updateMicroTime, 250);
 }
 
-function openMicro(kind = "note", lessonOwned = false){
+function openMicro(kind = "piano", lessonOwned = false){
   if (Metro.on) toggleMetro();
   state.micro.open = true;
   state.micro.kind = kind;
@@ -1040,13 +1300,14 @@ function openMicro(kind = "note", lessonOwned = false){
   $("micropanel").querySelectorAll("[data-kind]").forEach((button) =>
     button.setAttribute("aria-pressed", button.dataset.kind === kind ? "true" : "false"));
   renderMicro();
-  startMicroClock(lessonOwned ? (LESSON_PHASES[state.lesson?.phase]?.seconds || 90) : 90);
+  if (kind !== "piano") startMicroClock(lessonOwned ? (LESSON_PHASES[state.lesson?.phase]?.seconds || 90) : 90);
 }
 
 function closeMicro(force = false){
   if (state.micro.lessonOwned && !force){ stopLesson(); return; }
   state.micro.open = false;
   state.micro.lessonOwned = false;
+  stopTapPiano();
   clearInterval(state.micro.timer);
   clearTimeout(state.micro.roundTimer);
   state.micro.timer = null;
@@ -1125,10 +1386,9 @@ function answerMicro(choice){
 
 const LESSON_PHASES = [
   {seconds:15, title:"準備掃描", detail:"先找：調號？最小音符？最難的小節？", kind:"scan"},
-  {seconds:90, title:"1/4 節奏拍打", detail:"先把節奏與音高分開處理", kind:"micro-rhythm"},
-  {seconds:90, title:"2/4 音名快答", detail:"較慢的譜位會提高出題機率", kind:"micro-note"},
-  {seconds:240, title:"3/4 連續流", detail:"六軸自適應；遮罩強迫眼睛留在手前方", kind:"read"},
-  {seconds:60, title:"4/4 弱點重生", detail:"保留卡點特徵，換新種子收尾", kind:"weak"},
+  {seconds:180, title:"1/3 跟拍選音", detail:"逐音看譜，跟著節拍在小鋼琴上選音", kind:"micro-piano"},
+  {seconds:240, title:"2/3 連續閱讀", detail:"六軸自適應；遮罩強迫眼睛留在手前方", kind:"read"},
+  {seconds:60, title:"3/3 弱點重生", detail:"保留卡點特徵，換新種子收尾", kind:"weak"},
 ];
 
 function savedSessionSettings(){
@@ -1190,8 +1450,8 @@ function enterLessonPhase(index){
   }
   if (!lesson.trainingStartedAt) lesson.trainingStartedAt = Date.now();
 
-  if (phase.kind === "micro-note" || phase.kind === "micro-rhythm"){
-    openMicro(phase.kind === "micro-note" ? "note" : "rhythm", true);
+  if (phase.kind === "micro-piano"){
+    openMicro("piano", true);
     return;
   }
 
@@ -1907,7 +2167,9 @@ function bind(){
   });
   $("mode-read").addEventListener("click", () => setMode("read"));
   $("mode-chord").addEventListener("click", () => setMode("chord"));
-  $("mode-micro").addEventListener("click", () => openMicro(state.micro.kind));
+  $("mode-micro").addEventListener("click", () => openMicro("piano"));
+  $("togglepracticepiano").addEventListener("click", () => setPracticePiano(!state.practicePianoOpen));
+  $("closepracticepiano").addEventListener("click", () => setPracticePiano(false));
   $("startlesson").addEventListener("click", startLesson);
   $("gen").addEventListener("click", () => generate());
   $("reveal").addEventListener("click", toggleReveal);
@@ -2024,6 +2286,16 @@ function bind(){
     try { localStorage.setItem(MICRO_LEVEL_KEY, String(microLevel())); } catch {}
     if (state.micro.open) renderMicro();
   });
+  $("taphand").addEventListener("change", () => {
+    try { localStorage.setItem(TAP_HAND_KEY, tapHand()); } catch {}
+    if (state.micro.open) renderMicro();
+  });
+  $("taplabels").addEventListener("change", () => {
+    try { localStorage.setItem(TAP_LABELS_KEY, $("taplabels").checked ? "1" : "0"); } catch {}
+    if (state.micro.open && state.micro.item?.kind === "piano") renderPianoKeyboard(state.micro.item.events);
+  });
+  $("tapstart").addEventListener("click", startTapPiano);
+  $("tapnew").addEventListener("click", renderMicro);
   $("micropanel").querySelectorAll("[data-kind]").forEach((button) => button.addEventListener("click", () => {
     state.micro.kind = button.dataset.kind;
     $("micropanel").querySelectorAll("[data-kind]").forEach((item) =>
@@ -2058,6 +2330,7 @@ function bind(){
 
   // 練到一半關掉分頁，時數也要算進去
   window.addEventListener("pagehide", () => {
+    stopTapPiano(false);
     if (Metro.on){
       const barsCompleted = currentAttemptBars();
       const planned = state.stream?.current()?.cfg?.bars || 0;
@@ -2132,6 +2405,7 @@ async function boot(){
   fillProgressions();
   refreshChordKeys();
   restoreMicroLevel();
+  restorePracticePiano();
   setBpm(parseInt($("bpm").value, 10));
   $("zoomread").textContent = $("zoom").value + "%";
   Metro.volume = parseInt($("vol").value, 10) / 100;

@@ -43,7 +43,7 @@
   <div class="modes" role="group" aria-label="練習模式">
     <button id="mode-read" aria-pressed="true">視譜</button>
     <button id="mode-chord" aria-pressed="false">和弦</button>
-    <button id="mode-micro" aria-pressed="false">微練習</button>
+    <button id="mode-micro" aria-pressed="false">跟拍選音</button>
     <button id="startlesson" aria-pressed="false">8 分鐘導引</button>
   </div>
 
@@ -313,7 +313,10 @@
 
     <div class="paper">
       <div class="head">
-        <div class="title" id="sheetTitle">視譜練習</div>
+        <div class="paper-titleline">
+          <div class="title" id="sheetTitle">視譜練習</div>
+          <button class="paper-piano-toggle" id="togglepracticepiano" type="button" aria-expanded="false" aria-controls="practicepiano">🎹 小鋼琴</button>
+        </div>
         <div class="sub" id="sheetSub">—</div>
       </div>
       <div class="stage" id="stage">
@@ -330,6 +333,14 @@
       </div>
       <div class="answerbox" id="answer" hidden></div>
     </div>
+
+    <section class="practice-piano" id="practicepiano" hidden aria-label="一般練習小鋼琴">
+      <div class="practice-piano-head">
+        <div><b>小鋼琴</b><span id="practicepianorange">本段音域</span></div>
+        <button class="practice-piano-close" id="closepracticepiano" type="button" aria-label="收起小鋼琴">收起</button>
+      </div>
+      <div class="piano-scroll" id="practicepianoscroll"><div class="piano-keys" id="practicepianokeys"></div></div>
+    </section>
 
     <div class="ratingbar" id="ratingbar" hidden role="group" aria-label="評估剛才這一段">
       <span>剛才這段</span>
@@ -353,31 +364,33 @@
   </div>
 </main>
 
-<section class="micro-panel" id="micropanel" hidden aria-label="微練習">
+<section class="micro-panel" id="micropanel" hidden aria-label="跟拍選音">
   <div class="micro-card">
     <div class="micro-head">
-      <div><b>90 秒微練習</b><span><span id="microtime">01:30</span> · <span id="microstats">0 / 0</span></span></div>
+      <div><b>跟拍選音</b><span id="microstats">0 / 0</span></div>
       <button class="iconbtn" id="closemicro" aria-label="關閉">×</button>
     </div>
-    <div class="micro-kinds" role="group">
-      <button data-kind="note" aria-pressed="true">音名</button>
-      <button data-kind="rhythm" aria-pressed="false">節奏</button>
-      <button data-kind="shape" aria-pressed="false">形狀</button>
+    <div class="tap-settings">
+      <label for="microlevel"><span>難度</span><select id="microlevel">
+        <option value="1">1 · 入門</option><option value="2">2 · 基礎</option>
+        <option value="3" selected>3 · 標準</option><option value="4">4 · 進階</option>
+        <option value="5">5 · 挑戰</option><option value="6">6 · 極限</option>
+      </select></label>
+      <label for="taphand"><span>讀譜手</span><select id="taphand">
+        <option value="rh" selected>右手</option><option value="lh">左手</option>
+      </select></label>
+      <label class="tap-check"><input type="checkbox" id="taplabels"><span>顯示全部鍵名</span></label>
     </div>
-    <label class="micro-level" for="microlevel">
-      <span>微練習難度</span>
-      <select id="microlevel">
-        <option value="1">1 · 入門</option>
-        <option value="2">2 · 基礎</option>
-        <option value="3" selected>3 · 標準</option>
-        <option value="4">4 · 進階</option>
-        <option value="5">5 · 挑戰</option>
-        <option value="6">6 · 極限</option>
-      </select>
-    </label>
     <p id="microquestion"></p>
     <div class="micro-score" id="microscore"></div>
-    <div class="microanswers" id="microanswers"></div>
+    <div class="tap-runbar">
+      <span id="tapstatus">按開始後先聽一小節預備拍</span>
+      <button class="btn btn-primary" id="tapstart">開始跟拍</button>
+      <button class="btn btn-ghost" id="tapnew">換一段</button>
+    </div>
+    <div class="piano-scroll" id="pianoscroll"><div class="piano-keys" id="pianokeys"></div></div>
+    <div class="microanswers" id="microanswers" hidden></div>
+    <span id="microtime" hidden>01:30</span>
     <div class="microfeedback" id="microfeedback"></div>
   </div>
 </section>
@@ -399,6 +412,6 @@
 <!-- 拼頁列印用；平常不顯示，只有列印練習單時才排進頁面 -->
 <div class="printsheet" id="sheetout" hidden></div>
 
-<script type="module" src="js/main.js"></script>
+<script type="module" src="js/main.js?v=10"></script>
 </body>
 </html>

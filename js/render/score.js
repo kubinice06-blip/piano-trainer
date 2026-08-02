@@ -322,13 +322,15 @@ export function drawExercise(el, ex, opts){
       if (botNotes) drawBeams(ctx, botNotes, ex.ts);
 
       if (fingering && fingering.side === "top"){
-        drawFingering(svg, topNotes, fingering.measures[mi], st.getBottomY() + 13);
+        const fingerY = fingering.hand === "right" ? st.getY() - 10 : st.getBottomY() + 13;
+        drawFingering(svg, topNotes, fingering.measures[mi], fingerY);
       } else if (fingering && fingering.side === "bottom" && sb && botNotes){
         drawFingering(svg, botNotes, fingering.measures[mi], sb.getBottomY() + 13);
       }
 
       if (o.showNames && svg){
-        var lowY = (sb ? sb.getBottomY() : st.getBottomY()) + (fingering ? 29 : 16);
+        var fingerBelow = fingering && (fingering.side === "bottom" || fingering.hand === "left");
+        var lowY = (sb ? sb.getBottomY() : st.getBottomY()) + (fingerBelow ? 29 : 16);
         var lowItems = sb ? md.bottom : md.top;
         var lowNotes = sb ? botNotes : topNotes;
         for (var q = 0; q < lowNotes.length; q++){

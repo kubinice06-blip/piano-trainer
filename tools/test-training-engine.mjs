@@ -9,7 +9,7 @@ import { playbackVoiceProfile } from "../js/audio/sound.js";
 import { melodyFingering } from "../js/fingering.js";
 import { N, dIdx, noteName } from "../js/core/pitch.js";
 import { Key } from "../js/core/key.js";
-import { realize } from "../js/gen/chordprog.js";
+import { realize, generateChordDrill } from "../js/gen/chordprog.js";
 
 assert.equal(AXES.length, 6);
 const highRhythm = stepVector(normaliseVector(null, 2), "rhythm", "up");
@@ -58,13 +58,38 @@ const fingerExercise = {clef:"treble", melodyOn:"top", measures:[{top:[0,1,2,3,4
 const fingerHints = melodyFingering(fingerExercise);
 assert.deepEqual(fingerHints.entries.map((entry) => entry.finger), [1, 2, 3, 1, 2, 3]);
 assert.equal(fingerHints.entries[3].transition, "轉");
+assert.equal(fingerHints.measures.flat().filter(Boolean).length, 2,
+  "score shows only the opening finger and the actual crossing point");
 const inPositionExercise = {clef:"treble", melodyOn:"top", measures:[{top:[0,1,0,1,2,1,0].map((letter) =>
   ({rest:false, note:N(letter, 0, 4), dur:"q", clef:"treble"}))}]};
-assert.ok(melodyFingering(inPositionExercise).entries.every((entry) => !entry.transition),
+const inPositionHints = melodyFingering(inPositionExercise);
+assert.ok(inPositionHints.entries.every((entry) => !entry.transition),
   "direction changes inside one five-finger position do not create false movement hints");
+assert.equal(inPositionHints.measures.flat().filter(Boolean).length, 1,
+  "an in-position phrase only labels its starting finger");
+const risingLeaps = {clef:"treble", melodyOn:"top", measures:[{top:[0,2,4].map((letter) =>
+  ({rest:false, note:N(letter, 0, 4), dur:"q", clef:"treble"}))}]};
+const fallingLeaps = {clef:"treble", melodyOn:"top", measures:[{top:[4,2,0].map((letter) =>
+  ({rest:false, note:N(letter, 0, 4), dur:"q", clef:"treble"}))}]};
+assert.equal(melodyFingering(risingLeaps).entries[0].finger, 1, "right-hand rising leaps start from the thumb");
+assert.equal(melodyFingering(fallingLeaps).entries[0].finger, 5, "right-hand falling leaps start from the fifth finger");
 
 const circleRoots = realize("circle_down", Key.fromId("C")).flat().map((chord) => noteName(chord.root));
 assert.deepEqual(circleRoots, ["C", "F", "B", "E", "A", "D", "G", "C"]);
+
+const chordSymbolDrill = generateChordDrill({prog:"ii_V_I", order:"single", fixed:"C", count:1,
+  stage:"color", contour:"up", ts:"4/4", seed:1});
+assert.equal(chordSymbolDrill.grand, true);
+assert.equal(chordSymbolDrill.systems[0].measures[0].top.length, 8,
+  "right hand receives an eighth-note arpeggio line");
+assert.equal(chordSymbolDrill.systems[0].measures[0].bottom.length, 1,
+  "left hand supports each chord with one root");
+assert.deepEqual(chordSymbolDrill.systems[0].lessons[0].targetDegrees, ["1", "♭3", "5", "♭7", "9", "11"]);
+assert.deepEqual(chordSymbolDrill.systems[0].lessons[0].targetNotes, ["D", "F", "A", "C", "E", "G"]);
+const alteredDominantDrill = generateChordDrill({prog:"ii_V_i", order:"single", fixed:"Am", count:1,
+  stage:"color", contour:"guide", ts:"4/4", seed:2});
+assert.ok(alteredDominantDrill.systems[0].lessons[1].colorDegrees.includes("♭9"),
+  "an explicitly altered dominant teaches the alteration written in its chord symbol");
 
 const fingerprint = fingerprintExercise(original);
 const reviewCfg = cfgFromFingerprint(fingerprint, {...cfg, seed:654321});

@@ -274,6 +274,14 @@ input[type="range"]{
 .finger-guide[hidden]{display:none;}
 .fingerhint{font-family:var(--mono);font-size:10px;font-weight:700;fill:#6B6551;text-anchor:middle;}
 .fingerhint.turn{font-size:11px;fill:#B4462F;}
+.chord-coach{flex:0 0 auto;margin:-7px 0 10px;padding:9px 10px;background:#EFE4CE;color:#17333E;overflow-x:auto;}
+.chord-coach[hidden]{display:none;}
+.chord-coach-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:7px;font-size:11px;color:#5E513D;}
+.chord-coach-cards{display:flex;gap:7px;min-width:max-content;}
+.chord-card{display:grid;grid-template-columns:auto 1fr;gap:2px 9px;min-width:170px;padding:7px 9px;border:1px solid #CABD9D;background:#F8F1E2;}
+.chord-card strong{grid-row:1 / span 2;align-self:center;color:#B4462F;font-family:var(--mono);font-size:15px;}
+.chord-card span{font-size:10.5px;line-height:1.35;}
+.chord-card .actual{color:#756A55;font-family:var(--mono);}
 /* ---------- 舞台：現在這一段 + 已經畫好的下一段 ----------
    高度是由 score.js 依 maxHeight 算好才畫的，所以正常情況剛好放得下。
    縮到 70% 還是放不下時（螢幕太矮 + 小節太多），改由這裡捲 ——

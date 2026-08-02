@@ -7,7 +7,7 @@ import { Metro } from "./audio/metro.js";
 import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY, FOCUS, INVERSIONS,
          availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
 import { PROGRESSIONS, generateChordDrill, progressionCategories,
-         VOICINGS, compPatterns, compLabel } from "./gen/chordprog.js";
+         CHORD_STAGES, CHORD_CONTOURS } from "./gen/chordprog.js";
 import { MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, cycleOfFourths } from "./core/key.js";
 import { Stream } from "./stream.js";
 import { Library } from "./library.js";
@@ -188,31 +188,23 @@ function fillProgressions(){
     sel.appendChild(g);
   });
 
-  const voi = $("voi");
-  Object.keys(VOICINGS).forEach(id => {
+  const stage = $("chordstage");
+  Object.keys(CHORD_STAGES).forEach(id => {
     const o = document.createElement("option");
     o.value = id;
-    o.textContent = VOICINGS[id].label + (VOICINGS[id].hands === 2 ? " ✋✋" : "");
-    voi.appendChild(o);
+    o.textContent = CHORD_STAGES[id].label;
+    stage.appendChild(o);
   });
-  voi.value = "shell";
+  stage.value = "seventh";
 
-  refreshComping();
-}
-
-/* Comping 節奏只有 4/4 有完整的型；走路低音是獨立選項，會蓋掉 voicing 的右手 */
-function refreshComping(){
-  const sel = $("comp"), prev = sel.value;
-  sel.innerHTML = "";
-  compPatterns("4/4").forEach(id => {
+  const contour = $("chordcontour");
+  Object.keys(CHORD_CONTOURS).forEach(id => {
     const o = document.createElement("option");
-    o.value = id; o.textContent = compLabel(id);
-    sel.appendChild(o);
+    o.value = id;
+    o.textContent = CHORD_CONTOURS[id].label;
+    contour.appendChild(o);
   });
-  const w = document.createElement("option");
-  w.value = "walking"; w.textContent = "走路低音（雙手）✋✋";
-  sel.appendChild(w);
-  sel.value = Array.from(sel.options).some(o => o.value === prev) ? prev : "whole";
+  contour.value = "up";
 }
 
 function refreshChordKeys(){
@@ -381,6 +373,7 @@ function renderRead(){
   $("sheetTitle").textContent = "視譜練習";
   $("sheetSub").textContent = describe(cur);
   renderFingeringGuide(cur);
+  renderChordCoach(null);
   $("answer").hidden = true;
   buildBeatStrip(cur.beats);
   renderReview();
@@ -392,6 +385,26 @@ function renderFingeringGuide(ex){
   const visible = state.mode === "read" && !!ex && $("showfingering").checked;
   $("fingerguide").hidden = !visible;
   $("fingerguide").textContent = visible ? fingeringSummary(ex) : "";
+}
+
+function renderChordCoach(drill){
+  const box = $("chordcoach");
+  if (state.mode !== "chord" || !drill){ box.hidden = true; box.innerHTML = ""; return; }
+  const seen = new Set();
+  const lessons = (drill.systems[0]?.lessons || []).filter(item => {
+    if (seen.has(item.label)) return false;
+    seen.add(item.label); return true;
+  });
+  const showActual = state.revealed && $("shownotes").checked;
+  box.innerHTML =
+    '<div class="chord-coach-head"><b>讀法：根音 → 3、7 → 外音 → 分解</b><span>' +
+      esc(CHORD_STAGES[drill.stage].short + " · " + CHORD_CONTOURS[drill.contour].label) + '</span></div>' +
+    '<div class="chord-coach-cards">' + lessons.map(item =>
+      '<div class="chord-card"><strong>' + esc(item.label) + '</strong>' +
+      '<span>目標 ' + esc(item.targetDegrees.join("–")) + '　可用外音 ' + esc(item.colorDegrees.join("、")) + '</span>' +
+      '<span class="actual">' + (showActual ? esc(item.targetNotes.join(" · ")) : '先從代號推算，按「看答案」核對') + '</span></div>'
+    ).join("") + '</div>';
+  box.hidden = false;
 }
 
 /* 段落結束：下一列升上來（它已經畫好了），舊的那一列拿去畫新的下一段。
@@ -432,13 +445,14 @@ function renderChord(){
   });
   state.plans[0] = state.plan;
   state.layouts[0] = state.plan.layout;      // 游標要靠這個定位，忘了存就會卡在原點
-  $("sheetTitle").textContent = "爵士和弦練習";
+  $("sheetTitle").textContent = "和弦代號分解練習";
   renderFingeringGuide(null);
+  renderChordCoach(d);
   $("sheetSub").textContent = [
     d.label,
-    VOICINGS[d.cfg.style] ? VOICINGS[d.cfg.style].label : d.cfg.style,
-    compLabel(d.cfg.comp),
-    d.grand ? "雙手" : "左手",
+    CHORD_STAGES[d.stage].short,
+    CHORD_CONTOURS[d.contour].label,
+    "左手根音＋右手分解",
     d.systems.map(s => s.tonic.shortName).join(" → "),
     "#" + d.seed.toString(36)
   ].filter(Boolean).join(" · ");
@@ -1816,8 +1830,8 @@ function generate(opts){
       order: $("korder").value,
       fixed: $("kfixed").value,
       count: parseInt($("ncyc").value, 10),
-      style: $("voi").value,
-      comp: $("comp").value,
+      stage: $("chordstage").value,
+      contour: $("chordcontour").value,
       ts: "4/4",
       seed: (o.sameSeed && state.drill) ? state.drill.seed : undefined
     };
@@ -2226,7 +2240,7 @@ function bind(){
     $(id).addEventListener("change", () => { redraw(); updateRevealButton(); }));
 
   $("prog").addEventListener("change", () => { refreshChordKeys(); generate(); });
-  ["korder", "kfixed", "ncyc", "voi", "comp"].forEach(id =>
+  ["korder", "kfixed", "ncyc", "chordstage", "chordcontour"].forEach(id =>
     $(id).addEventListener("change", () => generate()));
   $("swing").addEventListener("input", function(){
     const v = parseInt(this.value, 10) / 100;

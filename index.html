@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>譜台 — 視譜與爵士和弦練習器</title>
+<title>譜台 — 視譜與和弦代號分解練習器</title>
 <meta name="theme-color" content="#0E2A33">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -37,7 +37,7 @@
 <aside class="rail" id="rail">
   <div class="brand">
     <h1>譜台</h1>
-    <p>視譜 · 爵士和弦 · 隨機出題</p>
+    <p>視譜 · 和弦代號 · 隨機出題</p>
   </div>
 
   <div class="modes" role="group" aria-label="練習模式">
@@ -199,14 +199,14 @@
     </fieldset>
 
     <fieldset>
-      <legend>Voicing 與節奏</legend>
+      <legend>和弦代號反應</legend>
       <div class="field">
-        <label for="voi">排列法</label>
-        <select id="voi"></select>
+        <label for="chordstage">練習層次<small class="hint">從和弦代號推算要彈的音</small></label>
+        <select id="chordstage"></select>
       </div>
       <div class="field">
-        <label for="comp">Comping 節奏</label>
-        <select id="comp"></select>
+        <label for="chordcontour">分解路線<small class="hint">左手彈根音，右手依路線分解</small></label>
+        <select id="chordcontour"></select>
       </div>
       <div class="field">
         <label for="swing">Swing <span id="swingread">平均八分</span></label>
@@ -304,7 +304,7 @@
         <tr><td>12 分</td><td>巴哈小步舞曲，分手練，把左手當旋律唱</td></tr>
         <tr><td>15 分</td><td>主曲目，只練難的那四小節，不要從頭彈到尾</td></tr>
         <tr><td>8 分</td><td><b style="color:var(--brass)">視譜</b>：比程度低兩級的新譜，慢速、不停、不回頭</td></tr>
-        <tr><td>7 分</td><td><b style="color:var(--brass)">爵士</b>：ii–V–I 五度循環，左手 shell，♩=60</td></tr>
+        <tr><td>7 分</td><td><b style="color:var(--brass)">爵士</b>：ii–V–I 五度循環，先抓 3、7，再加 9、13，♩=60</td></tr>
       </table>
     </div>
   </details>
@@ -331,6 +331,7 @@
         <div class="sub" id="sheetSub">—</div>
       </div>
       <div class="finger-guide" id="fingerguide" hidden></div>
+      <div class="chord-coach" id="chordcoach" hidden></div>
       <div class="stage" id="stage">
         <div class="row" id="rowA">
           <div class="rowtag"></div>
@@ -424,6 +425,6 @@
 <!-- 拼頁列印用；平常不顯示，只有列印練習單時才排進頁面 -->
 <div class="printsheet" id="sheetout" hidden></div>
 
-<script type="module" src="js/main.js?v=12"></script>
+<script type="module" src="js/main.js?v=14"></script>
 </body>
 </html>

@@ -5,13 +5,26 @@
  */
 
 import { Rng, randomSeed } from "../core/rng.js";
-import { iv, noteName, dIdx, parseVexKey } from "../core/pitch.js";
+import { N, iv, noteName, dIdx } from "../core/pitch.js";
 import { Key, cycleOfFourths } from "../core/key.js";
-import { chordLabel } from "../core/chords.js";
-import { voice, shellForm, VOICINGS } from "./voicing.js";
-import { compBar, walkingBass, compPatterns, COMP_PATTERNS,
-         ARPEGGIOS, isArpeggio, arpeggioBar } from "./comping.js";
+import { CHORDS, resolveType, chordLabel, bassOctave } from "../core/chords.js";
+import { VOICINGS } from "./voicing.js";
+import { compPatterns, COMP_PATTERNS, ARPEGGIOS, isArpeggio } from "./comping.js";
 import { tsInfo } from "./rhythm.js";
+
+export const CHORD_STAGES = {
+  guide:   {label:"第 1 · 導音骨架（根音＋3、7）", short:"導音骨架"},
+  seventh: {label:"第 2 · 七和弦（1、3、5、7）", short:"七和弦"},
+  ninth:   {label:"第 3 · 加九音（1、3、5、7、9）", short:"加九音"},
+  color:   {label:"第 4 · 可用外音（依和弦性質）", short:"可用外音"}
+};
+
+export const CHORD_CONTOURS = {
+  up:      {label:"上行 · 從低到高認音"},
+  down:    {label:"下行 · 從高到低認音"},
+  updown:  {label:"上下行 · 越過八度再折返"},
+  guide:   {label:"3–7 起步 · 先抓功能音"}
+};
 
 /* 一格 = [距主音音程, 和弦類型]。一個小節放一格或兩格。 */
 const P = {
@@ -145,8 +158,105 @@ export function realize(progId, tonicKey){
   })));
 }
 
+function fifthOf(C){
+  return C.ints.find(i => i === "P5" || i === "d5" || i === "A5") || "P5";
+}
+
+function intervalDegree(interval){
+  const labels = {
+    P1:"1", M3:"3", m3:"♭3", P4:"4", P5:"5", d5:"♭5", A5:"♯5",
+    M6:"6", m7:"♭7", M7:"7", d7:"𝄫7", M9:"9", b9:"♭9", s9:"♯9",
+    P11:"11", s11:"♯11", M13:"13", b13:"♭13"
+  };
+  return labels[interval] || interval;
+}
+
+function explicitExtensions(C){
+  return C.ints.filter(interval => /(?:9|11|13)$/.test(interval));
+}
+
+function colorIntervals(type){
+  const C = CHORDS[resolveType(type)];
+  const explicit = explicitExtensions(C);
+  if (explicit.length) return explicit;
+  if (C.fam === "maj") return ["M9", "M13"];
+  if (C.fam === "min") return ["M9", "P11"];
+  if (C.fam === "dom" || C.fam === "sus") return ["M9", "M13"];
+  if (C.fam === "halfdim") return ["M9", "P11"];
+  return ["M9"];
+}
+
+function uniqueIntervals(intervals){ return intervals.filter((v, i, a) => a.indexOf(v) === i); }
+
+function targetIntervals(type, stage){
+  const C = CHORDS[resolveType(type)];
+  const core = uniqueIntervals(["P1", C.third, fifthOf(C), C.sev]);
+  if (stage === "guide") return uniqueIntervals(["P1", C.third, C.sev]);
+  if (stage === "seventh") return core;
+  const colors = colorIntervals(type);
+  if (stage === "ninth") return uniqueIntervals(core.concat(colors.find(x => /9$/.test(x)) || "M9"));
+  return uniqueIntervals(core.concat(colors));
+}
+
+function notesForIntervals(root, intervals){
+  const base = N(root.l, root.a, 4);
+  return intervals.map(interval => iv(base, interval));
+}
+
+export function chordLesson(chord, stage = "seventh"){
+  const C = CHORDS[resolveType(chord.type)];
+  const core = uniqueIntervals(["P1", C.third, fifthOf(C), C.sev]);
+  const colors = colorIntervals(chord.type);
+  const target = targetIntervals(chord.type, stage);
+  return {
+    label:chord.label,
+    coreDegrees:core.map(intervalDegree),
+    colorDegrees:colors.map(intervalDegree),
+    targetDegrees:target.map(intervalDegree),
+    targetNotes:notesForIntervals(chord.root, target).map(noteName)
+  };
+}
+
+function risingNotes(root, intervals, count){
+  const source = notesForIntervals(root, intervals).sort((a, b) => dIdx(a) - dIdx(b));
+  const out = [];
+  while (out.length < count){
+    for (const original of source){
+      let note = N(original.l, original.a, original.o);
+      while (out.length && dIdx(note) <= dIdx(out[out.length - 1])) note = N(note.l, note.a, note.o + 1);
+      out.push(note);
+      if (out.length >= count) break;
+    }
+  }
+  return out;
+}
+
+function arpeggioLine(chord, stage, contour, count){
+  let intervals = targetIntervals(chord.type, stage);
+  if (contour === "guide"){
+    const C = CHORDS[resolveType(chord.type)];
+    intervals = uniqueIntervals([C.third, C.sev].concat(colorIntervals(chord.type), fifthOf(C), "P1"));
+  }
+  if (contour === "down") return risingNotes(chord.root, intervals, count).reverse();
+  if (contour === "updown"){
+    const up = risingNotes(chord.root, intervals, Math.ceil((count + 1) / 2));
+    const down = up.slice(0, -1).reverse();
+    while (up.length + down.length < count) down.push(up[Math.max(0, up.length - 2 - (down.length % Math.max(1, up.length - 1)))]);
+    return up.concat(down).slice(0, count);
+  }
+  return risingNotes(chord.root, intervals, count);
+}
+
+function durationForBeats(beats){
+  if (beats === 4) return "w";
+  if (beats === 3) return "hd";
+  if (beats === 2) return "h";
+  return "q";
+}
+
 /**
- * @param cfg {prog, order, fixed, count, style, comp, ts, seed}
+ * 和弦代號反應練習：左手只給根音，右手由代號推算骨架與外音後分解。
+ * @param cfg {prog, order, fixed, count, stage, contour, ts, seed}
  */
 export function generateChordDrill(cfg){
   const seed = (cfg.seed === undefined || cfg.seed === null) ? randomSeed() : cfg.seed;
@@ -174,61 +284,41 @@ export function generateChordDrill(cfg){
     }
   }
 
-  const walking = cfg.comp === "walking";
-  const lo = dIdx(parseVexKey("e/2")), hi = dIdx(parseVexKey("c/4"));
+  const stage = CHORD_STAGES[cfg.stage] ? cfg.stage : "seventh";
+  const contour = CHORD_CONTOURS[cfg.contour] ? cfg.contour : "up";
 
   const systems = tonics.map(key => {
     const bars = realize(cfg.prog, key);
-    const flat = [];
-    bars.forEach(b => b.forEach(c => flat.push(c)));
+    const lessons = bars.flat().map(chord => chordLesson(chord, stage));
 
-    // 走路低音需要知道整條和弦序列才能接得起來
-    const walk = walking ? walkingBass(rng.fork("walk"), flat, beats, lo, hi) : null;
-    let flatIdx = 0;
-
-    const measures = bars.map((bar, mi) => {
+    const measures = bars.map((bar) => {
       const perBar = bar.length;
       const top = [], bottom = [];
       const labels = [];
+      const cellBeats = beats / perBar;
 
       bar.forEach((c, ci) => {
-        const v = voice(c.root, c.type, walking ? "rootless" + (ci % 2 ? "B" : "A") : cfg.style,
-                        shellForm(flatIdx));
         labels.push({label: c.label, beat: ci * (beats / perBar)});
-
-        if (walking){
-          // 右手 voicing、左手每拍一個四分音符
-          const d = perBar === 1 ? (beats === 4 ? "w" : beats === 3 ? "hd" : "h") : "h";
-          top.push({rest:false, chordNotes:v.lh, note:v.lh[0], dur:d, clef:"treble"});
-          const wb = walk[flatIdx] || [];
-          const take = Math.round(beats / perBar);
-          for (let k = 0; k < take; k++){
-            bottom.push(wb[k] || {rest:false, note:v.lh[0], dur:"q", clef:"bass"});
-          }
-        } else if (isArpeggio(cfg.comp)){
-          const cell = arpeggioBar(v, cfg.comp, beats / perBar);
-          cell.top.forEach(x => top.push(x));
-          if (cell.bottom) cell.bottom.forEach(x => bottom.push(x));
-        } else {
-          const cell = compBar(v, perBar === 1 ? (cfg.comp || "whole") : "half", perBar === 1 ? ts : "x", beats / perBar);
-          cell.top.forEach(x => top.push(x));
-          if (cell.bottom) cell.bottom.forEach(x => bottom.push(x));
-        }
-        flatIdx++;
+        const count = Math.max(2, Math.round(cellBeats * 2));
+        arpeggioLine(c, stage, contour, count).forEach(note =>
+          top.push({rest:false, note, dur:"8", clef:"treble"}));
+        const bass = N(c.root.l, c.root.a, bassOctave(c.root));
+        bottom.push({rest:false, note:bass, dur:durationForBeats(cellBeats), clef:"bass"});
       });
 
       return {top, bottom: bottom.length ? bottom : null, labels,
-              names: bar.map(c => voice(c.root, c.type, cfg.style, 0).lh.map(noteName).join(" – ")),
+              label:bar.map(c => c.label).join(" → "),
+              names:bar.map(c => chordLesson(c, stage).targetNotes.join(" – ")),
               chords: bar};
     });
 
-    return {tonic: key, measures};
+    return {tonic: key, measures, lessons};
   });
 
   return {
     seed, cfg, systems,
-    style: cfg.style, prog: cfg.prog, ts, beats,
-    grand: systems[0].measures.some(m => m.bottom),
+    stage, contour, prog: cfg.prog, ts, beats,
+    grand:true,
     label: spec.label,
     createdAt: Date.now()
   };

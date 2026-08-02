@@ -19,6 +19,24 @@ function patternFor(hand, direction, length){
   return Array.from({length}, (_, index) => cycle[index % cycle.length]);
 }
 
+function travelDirection(entries, index){
+  if (entries[index + 1]){
+    const next = dIdx(entries[index + 1].note) - dIdx(entries[index].note);
+    if (next) return Math.sign(next);
+  }
+  if (entries[index - 1]){
+    const previous = dIdx(entries[index].note) - dIdx(entries[index - 1].note);
+    if (previous) return Math.sign(previous);
+  }
+  return 0;
+}
+
+function travelFinger(hand, direction){
+  if (!direction) return 3;
+  if (hand === "right") return direction > 0 ? 1 : 5;
+  return direction > 0 ? 5 : 1;
+}
+
 function melodySide(ex){ return ex.melodyOn === "bottom" ? "bottom" : "top"; }
 
 export function melodyFingering(ex){
@@ -41,7 +59,8 @@ export function melodyFingering(ex){
       while (end + 1 < entries.length && stepDirection(entries[end], entries[end + 1]) === direction) end++;
     }
     const length = end - start + 1;
-    const fingers = direction ? patternFor(hand, direction, length) : [hand === "right" ? 3 : 3];
+    const fingers = direction ? patternFor(hand, direction, length)
+                              : [travelFinger(hand, travelDirection(entries, start))];
     for (let offset = 0; offset < length; offset++){
       const entry = entries[start + offset];
       const finger = fingers[offset];
@@ -52,16 +71,17 @@ export function melodyFingering(ex){
       if (offset > 0){
         if (length > 5){
           const previous = fingers[offset - 1];
-          if (finger < previous && direction) transition = "轉";
-          else if (finger > previous && direction) transition = "跨";
+          const outward = (hand === "right" && direction > 0) || (hand === "left" && direction < 0);
+          if (outward && finger < previous) transition = "轉";
+          else if (!outward && finger > previous) transition = "跨";
         }
       } else if (start > 0){
         const previousEntry = entries[start - 1];
         if (Math.abs(dIdx(entry.note) - dIdx(previousEntry.note)) > 4) transition = "移";
       }
-      const hint = {...entry, finger, transition};
+      const hint = {...entry, finger, transition, key:start + offset === 0 || !!transition};
       entries[start + offset] = hint;
-      measures[entry.measure][entry.item] = hint;
+      if (hint.key) measures[entry.measure][entry.item] = hint;
     }
     start = end + 1;
   }
@@ -72,9 +92,12 @@ export function melodyFingering(ex){
 export function fingeringSummary(ex){
   const result = melodyFingering(ex);
   const handName = result.hand === "left" ? "左手" : "右手";
+  const first = result.entries[0];
+  if (!first) return "本段沒有需要標示的指法";
+  const opening = `${handName}起始：${noteName(first.note)}${first.note.o} 用 ${first.finger} 指`;
   const turns = result.entries.filter((entry) => entry.transition);
-  if (!turns.length) return `${handName}建議：本段保持同一手位，數字是建議手指`;
+  if (!turns.length) return `${opening}；其餘維持同一手位`;
   const points = turns.slice(0, 6).map((entry) =>
     `${noteName(entry.note)}${entry.note.o} ${entry.transition}${entry.finger}`).join("、");
-  return `${handName}轉指／移位：${points}${turns.length > 6 ? "…" : ""}（譜上 ↪ 為換位點）`;
+  return `${opening}；關鍵換位：${points}${turns.length > 6 ? "…" : ""}（譜上只標起點與 ↪ 換位點）`;
 }

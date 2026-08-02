@@ -76,10 +76,10 @@ assert.equal(melodyFingering(risingLeaps).entries[0].finger, 1, "right-hand risi
 assert.equal(melodyFingering(fallingLeaps).entries[0].finger, 5, "right-hand falling leaps start from the fifth finger");
 
 const circleRoots = realize("circle_down", Key.fromId("C")).flat().map((chord) => noteName(chord.root));
-assert.deepEqual(circleRoots, ["C", "F", "B", "E", "A", "D", "G", "C"]);
+assert.deepEqual(circleRoots, ["C", "F", "B♭", "E♭", "A♭", "D♭", "G♭", "B", "E", "A", "D", "G"]);
 
 const chordSymbolDrill = generateChordDrill({prog:"ii_V_I", order:"single", fixed:"C", count:1,
-  stage:"seventh", extensions:true, contour:"up", rhythm:"eighth", ts:"4/4", seed:1});
+  stage:"seventh", extensions:true, range:"one", contour:"up", rhythm:"eighth", ts:"4/4", seed:1});
 assert.equal(chordSymbolDrill.grand, true);
 assert.equal(chordSymbolDrill.systems[0].measures[0].top.length, 8,
   "right hand receives an eighth-note arpeggio line");
@@ -87,6 +87,27 @@ assert.equal(chordSymbolDrill.systems[0].measures[0].bottom.length, 1,
   "left hand supports each chord with one root");
 assert.deepEqual(chordSymbolDrill.systems[0].lessons[0].targetDegrees, ["1", "♭3", "5", "♭7", "9", "11"]);
 assert.deepEqual(chordSymbolDrill.systems[0].lessons[0].targetNotes, ["D", "F", "A", "C", "E", "G"]);
+const oneOctaveNotes = chordSymbolDrill.systems[0].measures[0].top.filter(item => !item.rest).map(item => item.note);
+assert.ok(Math.max(...oneOctaveNotes.map(dIdx)) - Math.min(...oneOctaveNotes.map(dIdx)) <= 7,
+  "beginner arpeggios remain inside one octave before turning around");
+const twoOctaveDrill = generateChordDrill({prog:"ii_V_I", order:"single", fixed:"C", count:1,
+  stage:"seventh", extensions:false, range:"two", contour:"up", rhythm:"eighth", ts:"4/4", seed:1});
+const twoOctaveNotes = twoOctaveDrill.systems[0].measures[0].top.filter(item => !item.rest).map(item => item.note);
+assert.ok(Math.max(...twoOctaveNotes.map(dIdx)) - Math.min(...twoOctaveNotes.map(dIdx)) > 7,
+  "advanced arpeggios can extend past one octave");
+assert.ok(Math.max(...twoOctaveNotes.map(dIdx)) - Math.min(...twoOctaveNotes.map(dIdx)) <= 14,
+  "advanced arpeggios stay inside the two-octave cap");
+for (const range of ["one", "two"]){
+  for (const contour of ["up", "down", "updown", "guide"]){
+    const drill = generateChordDrill({prog:"ii_V_I", order:"single", fixed:"C", count:1,
+      stage:"seventh", extensions:true, range, contour, rhythm:"eighth", ts:"4/4", seed:4});
+    drill.systems[0].measures.forEach(measure => {
+      const notes = measure.top.filter(item => !item.rest).map(item => item.note);
+      assert.ok(Math.max(...notes.map(dIdx)) - Math.min(...notes.map(dIdx)) <= (range === "one" ? 7 : 14),
+        `${range}/${contour} stays within its selected octave cap`);
+    });
+  }
+}
 const alteredDominantDrill = generateChordDrill({prog:"ii_V_i", order:"single", fixed:"Am", count:1,
   stage:"seventh", extensions:true, contour:"guide", rhythm:"syncopated", ts:"4/4", seed:2});
 assert.ok(alteredDominantDrill.systems[0].lessons[1].colorDegrees.includes("♭9"),

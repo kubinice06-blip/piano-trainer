@@ -24,6 +24,11 @@ export const CHORD_CONTOURS = {
   guide:   {label:"3–7 起步 · 先抓功能音"}
 };
 
+export const CHORD_RANGES = {
+  one: {label:"初階 · 一個八度（到八度即折返）", short:"一個八度", octaves:1},
+  two: {label:"進階 · 兩個八度", short:"兩個八度", octaves:2}
+};
+
 export const CHORD_RHYTHMS = {
   eighth:     {label:"平均八分 · 均勻流動"},
   quarter:    {label:"四分音符 · 一拍一音"},
@@ -93,11 +98,12 @@ const P = {
   I_IV:      {label:"I–IV–iii–vi", cat:"基礎", minor:false,
               bars:[[["P1","maj7"]], [["P4","maj7"]], [["M3","m7"]], [["M6","m7"]]]},
 
-  /* 根音每次下行純五度：C → F → B → E → A → D → G → C。
-     七個調性和弦形成完整圈，最後用 V7 回到 I。 */
-  circle_down:{label:"五度圈下行（I–IV–viiø–iii–vi–ii–V–I）", cat:"五度圈", minor:false,
-              bars:[[["P1","maj7"]], [["P4","maj7"]], [["M7","m7b5"]], [["M3","m7"]],
-                    [["M6","m7"]], [["M2","m7"]], [["P5","dom7"]], [["P1","maj7"]]]},
+  /* 根音每次下行純五度：C → F → B♭ → E♭ → A♭ → D♭ → G♭ → B → E → A → D → G。
+     十二個屬七涵蓋完整十二音，下一輪自然回到起始根音。 */
+  circle_down:{label:"五度圈下行（12 個屬七・含降音）", cat:"五度圈", minor:false,
+              bars:[[["P1","dom7"]], [["P4","dom7"]], [["m7","dom7"]], [["m3","dom7"]],
+                    [["m6","dom7"]], [["m2","dom7"]], [["d5","dom7"]], [["M7","dom7"]],
+                    [["M3","dom7"]], [["M6","dom7"]], [["M2","dom7"]], [["P5","dom7"]]]},
 
   /* ---------- 代理與經過 ---------- */
   tritone:   {label:"三全音代理 ii–♭II7–I", cat:"代理", minor:false,
@@ -262,35 +268,58 @@ export function chordLesson(chord, stage = "seventh", extensions = false){
   };
 }
 
-function risingNotes(root, intervals, count){
-  const source = notesForIntervals(root, intervals).sort((a, b) => dIdx(a) - dIdx(b));
+function normalizeToOctave(root, intervals){
+  const tonic = N(root.l, root.a, 4);
+  const low = dIdx(tonic), high = low + 7;
+  return uniqueIntervals(intervals).map(interval => {
+    let note = iv(tonic, interval);
+    while (dIdx(note) > high) note = N(note.l, note.a, note.o - 1);
+    while (dIdx(note) < low) note = N(note.l, note.a, note.o + 1);
+    return note;
+  });
+}
+
+function rangePath(root, intervals, octaves){
+  const tonic = N(root.l, root.a, 4);
+  const source = normalizeToOctave(root, intervals).sort((a, b) => dIdx(a) - dIdx(b));
   const out = [];
-  while (out.length < count){
-    for (const original of source){
-      let note = N(original.l, original.a, original.o);
-      while (out.length && dIdx(note) <= dIdx(out[out.length - 1])) note = N(note.l, note.a, note.o + 1);
-      out.push(note);
-      if (out.length >= count) break;
-    }
+  for (let octave = 0; octave < octaves; octave++){
+    source.forEach(note => out.push(N(note.l, note.a, note.o + octave)));
   }
+  out.push(N(tonic.l, tonic.a, tonic.o + octaves));
   return out;
 }
 
-function arpeggioLine(chord, stage, extensions, contour, count){
+function repeatPath(path, count){
+  if (!path.length || !count) return [];
+  const bounce = path.length > 1 ? path.concat(path.slice(0, -1).reverse()) : path;
+  return Array.from({length:count}, (_, i) => bounce[i % bounce.length]);
+}
+
+function arpeggioLine(chord, stage, extensions, rangeId, contour, count){
   let intervals = targetIntervals(chord.type, stage, extensions);
   if (contour === "guide"){
     const C = CHORDS[resolveType(chord.type)];
     intervals = uniqueIntervals([C.third, C.sev].concat(intervals.filter(interval =>
       interval !== C.third && interval !== C.sev)));
   }
-  if (contour === "down") return risingNotes(chord.root, intervals, count).reverse();
-  if (contour === "updown"){
-    const up = risingNotes(chord.root, intervals, Math.ceil((count + 1) / 2));
-    const down = up.slice(0, -1).reverse();
-    while (up.length + down.length < count) down.push(up[Math.max(0, up.length - 2 - (down.length % Math.max(1, up.length - 1)))]);
-    return up.concat(down).slice(0, count);
+  const octaves = (CHORD_RANGES[rangeId] || CHORD_RANGES.one).octaves;
+  let path = rangePath(chord.root, intervals, octaves);
+  if (contour === "guide"){
+    // 3、7 先出現，但所有音仍被限制在選定的八度範圍內。
+    const preferred = normalizeToOctave(chord.root, intervals);
+    const C = CHORDS[resolveType(chord.type)];
+    const third = normalizeToOctave(chord.root, [C.third])[0];
+    const seventh = normalizeToOctave(chord.root, [C.sev])[0];
+    const ordered = [third, seventh].concat(preferred.filter(note =>
+      dIdx(note) !== dIdx(third) && dIdx(note) !== dIdx(seventh)));
+    path = [];
+    for (let octave = 0; octave < octaves; octave++){
+      ordered.forEach(note => path.push(N(note.l, note.a, note.o + octave)));
+    }
   }
-  return risingNotes(chord.root, intervals, count);
+  if (contour === "down") path = path.slice().reverse();
+  return repeatPath(path, count);
 }
 
 function durationForBeats(beats){
@@ -302,7 +331,7 @@ function durationForBeats(beats){
 
 /**
  * 和弦代號反應練習：左手只給根音，右手由代號推算骨架與外音後分解。
- * @param cfg {prog, order, fixed, count, stage, extensions, contour, rhythm, ts, seed}
+ * @param cfg {prog, order, fixed, count, stage, extensions, range, contour, rhythm, ts, seed}
  */
 export function generateChordDrill(cfg){
   const seed = (cfg.seed === undefined || cfg.seed === null) ? randomSeed() : cfg.seed;
@@ -332,6 +361,7 @@ export function generateChordDrill(cfg){
 
   const stage = CHORD_STAGES[cfg.stage] ? cfg.stage : "seventh";
   const extensions = !!cfg.extensions;
+  const range = CHORD_RANGES[cfg.range] ? cfg.range : "one";
   const contour = CHORD_CONTOURS[cfg.contour] ? cfg.contour : "up";
   const rhythm = CHORD_RHYTHMS[cfg.rhythm] ? cfg.rhythm : "eighth";
 
@@ -349,7 +379,7 @@ export function generateChordDrill(cfg){
         labels.push({label: c.label, beat: ci * (beats / perBar)});
         const pattern = chordRhythmPattern(rhythm, cellBeats);
         const count = pattern.filter(cell => !cell[1]).length;
-        const line = arpeggioLine(c, stage, extensions, contour, count);
+        const line = arpeggioLine(c, stage, extensions, range, contour, count);
         let noteIndex = 0;
         pattern.forEach(([dur, rest]) => {
           if (rest) top.push({rest:true, dur, clef:"treble"});
@@ -370,7 +400,7 @@ export function generateChordDrill(cfg){
 
   return {
     seed, cfg, systems,
-    stage, extensions, contour, rhythm, prog: cfg.prog, ts, beats,
+    stage, extensions, range, contour, rhythm, prog: cfg.prog, ts, beats,
     grand:true,
     label: spec.label,
     createdAt: Date.now()

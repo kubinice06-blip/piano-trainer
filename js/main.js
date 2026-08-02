@@ -7,7 +7,7 @@ import { Metro } from "./audio/metro.js";
 import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY, FOCUS, INVERSIONS,
          availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
 import { PROGRESSIONS, generateChordDrill, progressionCategories,
-         CHORD_STAGES, CHORD_CONTOURS, CHORD_RHYTHMS } from "./gen/chordprog.js";
+         CHORD_STAGES, CHORD_RANGES, CHORD_CONTOURS, CHORD_RHYTHMS } from "./gen/chordprog.js";
 import { MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, cycleOfFourths } from "./core/key.js";
 import { Stream } from "./stream.js";
 import { Library } from "./library.js";
@@ -196,6 +196,15 @@ function fillProgressions(){
     stage.appendChild(o);
   });
   stage.value = "seventh";
+
+  const range = $("chordrange");
+  Object.keys(CHORD_RANGES).forEach(id => {
+    const o = document.createElement("option");
+    o.value = id;
+    o.textContent = CHORD_RANGES[id].label;
+    range.appendChild(o);
+  });
+  range.value = "one";
 
   const contour = $("chordcontour");
   Object.keys(CHORD_CONTOURS).forEach(id => {
@@ -408,7 +417,7 @@ function renderChordCoach(drill){
   const extensionLabel = drill.extensions ? "外音開啟" : "外音關閉";
   box.innerHTML =
     '<div class="chord-coach-head"><b>讀法：根音 → 3、7 → 外音 → 分解</b><span>' +
-      esc(CHORD_STAGES[drill.stage].short + " · " + extensionLabel + " · " + CHORD_RHYTHMS[drill.rhythm].label) + '</span></div>' +
+      esc(CHORD_STAGES[drill.stage].short + " · " + CHORD_RANGES[drill.range].short + " · " + extensionLabel + " · " + CHORD_RHYTHMS[drill.rhythm].label) + '</span></div>' +
     '<div class="chord-coach-cards">' + lessons.map(item =>
       '<div class="chord-card"><strong>' + esc(item.label) + '</strong>' +
       '<span>目標 ' + esc(item.targetDegrees.join("–")) + '　' +
@@ -462,6 +471,7 @@ function renderChord(){
   $("sheetSub").textContent = [
     d.label,
     CHORD_STAGES[d.stage].short,
+    CHORD_RANGES[d.range].short,
     d.extensions ? "外音開啟" : "外音關閉",
     CHORD_CONTOURS[d.contour].label,
     CHORD_RHYTHMS[d.rhythm].label,
@@ -1841,6 +1851,7 @@ function generate(opts){
       count: parseInt($("ncyc").value, 10),
       stage: $("chordstage").value,
       extensions: $("chordextensions").checked,
+      range: $("chordrange").value,
       contour: $("chordcontour").value,
       rhythm: $("chordrhythm").value,
       ts: "4/4",
@@ -2251,7 +2262,7 @@ function bind(){
     $(id).addEventListener("change", () => { redraw(); updateRevealButton(); }));
 
   $("prog").addEventListener("change", () => { refreshChordKeys(); generate(); });
-  ["korder", "kfixed", "ncyc", "chordstage", "chordextensions", "chordcontour", "chordrhythm"].forEach(id =>
+  ["korder", "kfixed", "ncyc", "chordstage", "chordrange", "chordextensions", "chordcontour", "chordrhythm"].forEach(id =>
     $(id).addEventListener("change", () => generate()));
   $("swing").addEventListener("input", function(){
     const v = parseInt(this.value, 10) / 100;

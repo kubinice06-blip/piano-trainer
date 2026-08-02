@@ -22,7 +22,21 @@
     <span class="bars"></span>
   </button>
 
-  <div class="tb-read"><span id="bpmread">60</span><small>BPM</small></div>
+  <div class="tb-speed" aria-label="速度控制">
+    <select id="toptempo" aria-label="選擇速度預設">
+      <option value="">自訂速度</option>
+      <option value="40">40 · 慢讀</option>
+      <option value="52">52 · 入門</option>
+      <option value="60" selected>60 · 練習</option>
+      <option value="72">72 · 穩定</option>
+      <option value="88">88 · 推進</option>
+      <option value="104">104 · 流暢</option>
+      <option value="120">120 · 目標</option>
+      <option value="144">144 · 快速</option>
+    </select>
+    <input type="range" id="toptemporange" min="30" max="220" step="1" value="60" aria-label="微調速度">
+    <div class="tb-speed-read"><output id="bpmread" for="toptemporange">60</output><small>BPM</small></div>
+  </div>
   <div class="beatstrip" id="beatstrip"></div>
   <div class="tb-read tb-bars"><span id="barcount">0</span><small>小節</small></div>
   <div class="tb-meta" id="clipmeta">停止</div>
@@ -434,6 +448,6 @@
 <!-- 拼頁列印用；平常不顯示，只有列印練習單時才排進頁面 -->
 <div class="printsheet" id="sheetout" hidden></div>
 
-<script type="module" src="js/main.js?v=17"></script>
+<script type="module" src="js/main.js?v=18"></script>
 </body>
 </html>

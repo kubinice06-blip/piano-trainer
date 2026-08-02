@@ -297,6 +297,9 @@ function setBpm(v){
   $("tempo").value = String(b);
   $("temporead").textContent = String(b);
   $("bpmread").textContent = String(b);
+  $("toptemporange").value = String(b);
+  // 預設清單用於快速選速；拉桿可保留每一 BPM 的微調，不強迫跳回最近預設。
+  $("toptempo").value = Array.from($("toptempo").options).some((option) => Number(option.value) === b) ? String(b) : "";
   if (Metro.on) Metro.bpm = b;
   return b;
 }
@@ -2274,6 +2277,10 @@ function bind(){
   $("revealed").addEventListener("change", () => { state.revealed = $("revealed").checked; redraw(); updateRevealButton(); });
 
   $("tempo").addEventListener("input", function(){ setBpm(parseInt(this.value, 10)); });
+  $("toptemporange").addEventListener("input", function(){ setBpm(parseInt(this.value, 10)); });
+  $("toptempo").addEventListener("change", function(){
+    if (this.value) setBpm(parseInt(this.value, 10));
+  });
   // 數字框讓人邊打邊清空，所以只在打完（change / blur）時才夾回合法範圍
   $("bpm").addEventListener("input", function(){
     const v = parseInt(this.value, 10);

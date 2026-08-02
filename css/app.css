@@ -51,6 +51,24 @@ body{
   letter-spacing:.03em;line-height:1;white-space:nowrap;
 }
 .tb-read small{font-size:9px;letter-spacing:.16em;display:block;font-weight:400;opacity:.72;margin-top:2px;}
+.tb-speed{
+  display:grid;grid-template-columns:112px minmax(110px,1fr) auto;gap:8px;align-items:center;
+  flex:1 1 340px;min-width:280px;max-width:620px;
+}
+.tb-speed select{
+  width:112px;min-height:36px;padding:5px 24px 5px 8px;
+  border:1px solid rgba(20,38,45,.38);border-radius:3px;
+  background:rgba(246,241,228,.35);color:#14262D;
+  font:600 11px/1.2 var(--mono);letter-spacing:.01em;
+}
+.tb-speed input[type="range"]{
+  width:100%;min-width:0;margin:0;accent-color:#14262D;
+}
+.tb-speed-read{
+  min-width:32px;font-family:var(--mono);font-size:17px;font-weight:700;color:#14262D;
+  letter-spacing:.02em;line-height:1;text-align:right;white-space:nowrap;
+}
+.tb-speed-read small{font-size:8px;letter-spacing:.13em;display:block;font-weight:400;opacity:.72;margin-top:2px;}
 .tb-meta{
   font-family:var(--mono);font-size:10.5px;color:rgba(20,38,45,.72);
   letter-spacing:.1em;text-transform:uppercase;white-space:nowrap;
@@ -231,10 +249,10 @@ input[type="range"]{
 .sheetwrap{max-width:1180px;margin:0 auto;flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;}
 
 /* 拍點條 —— 招牌元素 */
-.beatstrip{display:flex;gap:4px;flex:1 1 140px;min-width:90px;max-width:420px;height:24px;align-items:stretch;}
-.topbar .beatstrip{margin-right:auto;}
+.beatstrip{display:flex;gap:2px;flex:0 0 auto;min-width:0;max-width:none;height:20px;align-items:stretch;}
+.topbar .beatstrip{margin-right:0;}
 .beatcell{
-  flex:1;background:rgba(20,38,45,.18);border:1px solid rgba(20,38,45,.34);
+  flex:0 0 16px;background:rgba(20,38,45,.18);border:1px solid rgba(20,38,45,.34);
   border-radius:1px;position:relative;overflow:hidden;
 }
 .beatcell.on{background:#14262D;}
@@ -242,7 +260,7 @@ input[type="range"]{
 .beatcell::after{
   content:attr(data-n);position:absolute;inset:0;
   display:flex;align-items:center;justify-content:center;
-  font-family:var(--mono);font-size:10px;color:rgba(20,38,45,.55);
+  font-family:var(--mono);font-size:8px;color:rgba(20,38,45,.55);
 }
 .beatcell.on::after{color:rgba(246,241,228,.85);}
 
@@ -610,9 +628,15 @@ details.recipe td:first-child{font-family:var(--mono);color:var(--brass);white-s
   .paper{padding:16px 10px 20px;}
   .paper .head{gap:8px;}
   .tb-bars, .tb-meta{display:none;}
+  .tb-speed{flex-basis:260px;min-width:220px;grid-template-columns:104px minmax(70px,1fr) auto;gap:6px;}
+  .tb-speed select{width:104px;font-size:10px;}
 }
 @media (max-width:620px){
   .tb-read{display:none;}
+  .tb-speed{min-width:0;grid-template-columns:94px minmax(56px,1fr) auto;gap:5px;}
+  .tb-speed select{width:94px;font-size:9px;}
+  .tb-speed-read{font-size:14px;}
+  .beatcell{flex-basis:13px;}
 }
 
 /* 矮螢幕（橫放的 iPad 大約只有 740px 高）：外框的留白全部收緊，

@@ -51,6 +51,24 @@ body{
   letter-spacing:.03em;line-height:1;white-space:nowrap;
 }
 .tb-read small{font-size:9px;letter-spacing:.16em;display:block;font-weight:400;opacity:.72;margin-top:2px;}
+.tb-speed{
+  display:grid;grid-template-columns:112px minmax(110px,1fr) auto;gap:8px;align-items:center;
+  flex:1 1 340px;min-width:280px;max-width:620px;
+}
+.tb-speed select{
+  width:112px;min-height:36px;padding:5px 24px 5px 8px;
+  border:1px solid rgba(20,38,45,.38);border-radius:3px;
+  background:rgba(246,241,228,.35);color:#14262D;
+  font:600 11px/1.2 var(--mono);letter-spacing:.01em;
+}
+.tb-speed input[type="range"]{
+  width:100%;min-width:0;margin:0;accent-color:#14262D;
+}
+.tb-speed-read{
+  min-width:32px;font-family:var(--mono);font-size:17px;font-weight:700;color:#14262D;
+  letter-spacing:.02em;line-height:1;text-align:right;white-space:nowrap;
+}
+.tb-speed-read small{font-size:8px;letter-spacing:.13em;display:block;font-weight:400;opacity:.72;margin-top:2px;}
 .tb-meta{
   font-family:var(--mono);font-size:10.5px;color:rgba(20,38,45,.72);
   letter-spacing:.1em;text-transform:uppercase;white-space:nowrap;
@@ -231,10 +249,10 @@ input[type="range"]{
 .sheetwrap{max-width:1180px;margin:0 auto;flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;}
 
 /* 拍點條 —— 招牌元素 */
-.beatstrip{display:flex;gap:4px;flex:1 1 140px;min-width:90px;max-width:420px;height:24px;align-items:stretch;}
-.topbar .beatstrip{margin-right:auto;}
+.beatstrip{display:flex;gap:2px;flex:0 0 auto;min-width:0;max-width:none;height:20px;align-items:stretch;}
+.topbar .beatstrip{margin-right:0;}
 .beatcell{
-  flex:1;background:rgba(20,38,45,.18);border:1px solid rgba(20,38,45,.34);
+  flex:0 0 16px;background:rgba(20,38,45,.18);border:1px solid rgba(20,38,45,.34);
   border-radius:1px;position:relative;overflow:hidden;
 }
 .beatcell.on{background:#14262D;}
@@ -242,7 +260,7 @@ input[type="range"]{
 .beatcell::after{
   content:attr(data-n);position:absolute;inset:0;
   display:flex;align-items:center;justify-content:center;
-  font-family:var(--mono);font-size:10px;color:rgba(20,38,45,.55);
+  font-family:var(--mono);font-size:8px;color:rgba(20,38,45,.55);
 }
 .beatcell.on::after{color:rgba(246,241,228,.85);}
 
@@ -286,6 +304,21 @@ input[type="range"]{
 .coach-btn.primary{background:#8A6520;border-color:#8A6520;color:#fff;}
 .coach-btn.danger{border-color:#B4462F;color:#9D3825;}
 .coach-btn[aria-pressed="true"]{background:#B4462F;border-color:#B4462F;color:#fff;}
+.finger-guide{
+  flex:0 0 auto;margin:-7px 0 10px;padding:7px 10px;border-left:3px solid #B4462F;
+  background:#EFE4CE;color:#5E513D;font-size:11.5px;line-height:1.45;
+}
+.finger-guide[hidden]{display:none;}
+.fingerhint{font-family:var(--mono);font-size:10px;font-weight:700;fill:#6B6551;text-anchor:middle;}
+.fingerhint.turn{font-size:11px;fill:#B4462F;}
+.chord-coach{flex:0 0 auto;margin:-7px 0 10px;padding:9px 10px;background:#EFE4CE;color:#17333E;overflow-x:auto;}
+.chord-coach[hidden]{display:none;}
+.chord-coach-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:7px;font-size:11px;color:#5E513D;}
+.chord-coach-cards{display:flex;gap:7px;min-width:max-content;}
+.chord-card{display:grid;grid-template-columns:auto 1fr;gap:2px 9px;min-width:170px;padding:7px 9px;border:1px solid #CABD9D;background:#F8F1E2;}
+.chord-card strong{grid-row:1 / span 2;align-self:center;color:#B4462F;font-family:var(--mono);font-size:15px;}
+.chord-card span{font-size:10.5px;line-height:1.35;}
+.chord-card .actual{color:#756A55;font-family:var(--mono);}
 /* ---------- 舞台：現在這一段 + 已經畫好的下一段 ----------
    高度是由 score.js 依 maxHeight 算好才畫的，所以正常情況剛好放得下。
    縮到 70% 還是放不下時（螢幕太矮 + 小節太多），改由這裡捲 ——
@@ -442,6 +475,10 @@ input[type="range"]{
 .stats .ok{color:var(--brass);font-family:var(--mono);}
 .axis-head{display:flex;justify-content:space-between;align-items:baseline;margin:14px 0 8px;color:var(--brass);font-size:12px;}
 .axis-head small{color:var(--bone-dim);font-size:10.5px;}
+.difficulty-details{margin-top:10px;border:1px solid rgba(220,212,192,.18);padding:8px 9px;}
+.difficulty-details summary{cursor:pointer;color:var(--brass);font-size:12px;line-height:1.5;}
+.difficulty-details summary small{display:block;color:var(--bone-dim);font-size:10.5px;margin-top:2px;}
+.difficulty-details[open] summary{margin-bottom:9px;}
 .axis-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
 .axis-item{display:grid;gap:3px;font-size:10.5px;color:var(--bone-dim);}
 .axis-item select{width:100%;}
@@ -610,9 +647,15 @@ details.recipe td:first-child{font-family:var(--mono);color:var(--brass);white-s
   .paper{padding:16px 10px 20px;}
   .paper .head{gap:8px;}
   .tb-bars, .tb-meta{display:none;}
+  .tb-speed{flex-basis:260px;min-width:220px;grid-template-columns:104px minmax(70px,1fr) auto;gap:6px;}
+  .tb-speed select{width:104px;font-size:10px;}
 }
 @media (max-width:620px){
   .tb-read{display:none;}
+  .tb-speed{min-width:0;grid-template-columns:94px minmax(56px,1fr) auto;gap:5px;}
+  .tb-speed select{width:94px;font-size:9px;}
+  .tb-speed-read{font-size:14px;}
+  .beatcell{flex-basis:13px;}
 }
 
 /* 矮螢幕（橫放的 iPad 大約只有 740px 高）：外框的留白全部收緊，

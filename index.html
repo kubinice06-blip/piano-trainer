@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>譜台 — 視譜與爵士和弦練習器</title>
+<title>譜台 — 視譜與和弦代號分解練習器</title>
 <meta name="theme-color" content="#0E2A33">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -22,7 +22,21 @@
     <span class="bars"></span>
   </button>
 
-  <div class="tb-read"><span id="bpmread">60</span><small>BPM</small></div>
+  <div class="tb-speed" aria-label="速度控制">
+    <select id="toptempo" aria-label="選擇速度預設">
+      <option value="">自訂速度</option>
+      <option value="40">40 · 慢讀</option>
+      <option value="52">52 · 入門</option>
+      <option value="60" selected>60 · 練習</option>
+      <option value="72">72 · 穩定</option>
+      <option value="88">88 · 推進</option>
+      <option value="104">104 · 流暢</option>
+      <option value="120">120 · 目標</option>
+      <option value="144">144 · 快速</option>
+    </select>
+    <input type="range" id="toptemporange" min="30" max="220" step="1" value="60" aria-label="微調速度">
+    <div class="tb-speed-read"><output id="bpmread" for="toptemporange">60</output><small>BPM</small></div>
+  </div>
   <div class="beatstrip" id="beatstrip"></div>
   <div class="tb-read tb-bars"><span id="barcount">0</span><small>小節</small></div>
   <div class="tb-meta" id="clipmeta">停止</div>
@@ -37,7 +51,7 @@
 <aside class="rail" id="rail">
   <div class="brand">
     <h1>譜台</h1>
-    <p>視譜 · 爵士和弦 · 隨機出題</p>
+    <p>視譜 · 和弦代號 · 隨機出題</p>
   </div>
 
   <div class="modes" role="group" aria-label="練習模式">
@@ -49,12 +63,41 @@
 
   <div id="panel-read">
     <fieldset>
-      <legend>出題</legend>
+      <legend>練習工具</legend>
       <div class="row2">
         <div class="field">
           <label for="lv">難度</label>
           <select id="lv"></select>
         </div>
+        <div class="field">
+          <label for="hands">練習手</label>
+          <select id="hands"></select>
+        </div>
+      </div>
+      <div class="row2">
+        <div class="field">
+          <label for="dens">音符長短</label>
+          <select id="dens"></select>
+        </div>
+        <div class="field">
+          <label for="focus">強化練習</label>
+          <select id="focus"></select>
+        </div>
+      </div>
+      <label class="check"><input type="checkbox" id="showfingering" checked> 顯示指法與轉指位置</label>
+      <label class="check">
+        <input type="checkbox" id="adaptive" checked>
+        依「順／有絆／垮掉」自動調整難度
+      </label>
+      <details class="difficulty-details">
+        <summary>六軸難度微調 <small id="axistarget">目前強化：—</small></summary>
+        <div class="axis-grid" id="axiscontrols"></div>
+      </details>
+    </fieldset>
+
+    <fieldset>
+      <legend>出題範圍</legend>
+      <div class="row2">
         <div class="field">
           <label for="ts">拍號</label>
           <select id="ts">
@@ -63,27 +106,15 @@
             <option value="2/4">2/4</option>
           </select>
         </div>
-      </div>
-      <div class="field">
-        <label for="keysel">調性</label>
-        <select id="keysel"></select>
-      </div>
-      <div class="field">
-        <label for="dens">音符長短</label>
-        <select id="dens"></select>
-      </div>
-      <div class="field">
-        <label for="focus">強化練習</label>
-        <select id="focus"></select>
+        <div class="field">
+          <label for="keysel">調性</label>
+          <select id="keysel"></select>
+        </div>
       </div>
     </fieldset>
 
     <fieldset>
       <legend>兩手與伴奏</legend>
-      <div class="field">
-        <label for="hands">練習手</label>
-        <select id="hands"></select>
-      </div>
       <button class="btn btn-ghost btn-wide" id="swaphands">⇄ 左右手交換練同一段</button>
       <div class="field">
         <label for="lhpat">伴奏寫法<small class="hint">沒拿旋律的那隻手</small></label>
@@ -123,12 +154,6 @@
           <option value="8">8 遍</option>
         </select>
       </div>
-      <label class="check">
-        <input type="checkbox" id="adaptive" checked>
-        依「順／有絆／垮掉」自動調整難度
-      </label>
-      <div class="axis-head"><span>六軸難度</span><small id="axistarget">目前強化：—</small></div>
-      <div class="axis-grid" id="axiscontrols"></div>
     </fieldset>
 
     <fieldset>
@@ -200,14 +225,23 @@
     </fieldset>
 
     <fieldset>
-      <legend>Voicing 與節奏</legend>
+      <legend>和弦代號反應</legend>
       <div class="field">
-        <label for="voi">排列法</label>
-        <select id="voi"></select>
+        <label for="chordstage">練習層次<small class="hint">從和弦代號推算要彈的音</small></label>
+        <select id="chordstage"></select>
       </div>
       <div class="field">
-        <label for="comp">Comping 節奏</label>
-        <select id="comp"></select>
+        <label for="chordrange">分解音域<small class="hint">初階先守住一個八度，再擴到兩個八度</small></label>
+        <select id="chordrange"></select>
+      </div>
+      <label class="check"><input type="checkbox" id="chordextensions"> 加入 9、11、13 等七和弦以上外音</label>
+      <div class="field">
+        <label for="chordcontour">分解路線<small class="hint">左手彈根音，右手依路線分解</small></label>
+        <select id="chordcontour"></select>
+      </div>
+      <div class="field">
+        <label for="chordrhythm">分解節奏<small class="hint">同一組和弦音，改變落點與長短</small></label>
+        <select id="chordrhythm"></select>
       </div>
       <div class="field">
         <label for="swing">Swing <span id="swingread">平均八分</span></label>
@@ -305,7 +339,7 @@
         <tr><td>12 分</td><td>巴哈小步舞曲，分手練，把左手當旋律唱</td></tr>
         <tr><td>15 分</td><td>主曲目，只練難的那四小節，不要從頭彈到尾</td></tr>
         <tr><td>8 分</td><td><b style="color:var(--brass)">視譜</b>：比程度低兩級的新譜，慢速、不停、不回頭</td></tr>
-        <tr><td>7 分</td><td><b style="color:var(--brass)">爵士</b>：ii–V–I 五度循環，左手 shell，♩=60</td></tr>
+        <tr><td>7 分</td><td><b style="color:var(--brass)">爵士</b>：ii–V–I 五度循環，先抓 3、7，再加 9、13，♩=60</td></tr>
       </table>
     </div>
   </details>
@@ -339,6 +373,8 @@
         </div>
         <div class="coach-actions" id="coachactions"></div>
       </section>
+      <div class="finger-guide" id="fingerguide" hidden></div>
+      <div class="chord-coach" id="chordcoach" hidden></div>
       <div class="stage" id="stage">
         <div class="row" id="rowA">
           <div class="rowtag"></div>
@@ -434,6 +470,6 @@
 <!-- 拼頁列印用；平常不顯示，只有列印練習單時才排進頁面 -->
 <div class="printsheet" id="sheetout" hidden></div>
 
-<script type="module" src="js/main.js?v=10"></script>
+<script type="module" src="js/main.js?v=18"></script>
 </body>
 </html>

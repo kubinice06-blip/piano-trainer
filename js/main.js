@@ -7,7 +7,7 @@ import { Metro } from "./audio/metro.js";
 import { LEVELS, KEY_POOLS, HAND_MODES, HAND_SWAP, NOTE_DENSITY, FOCUS, INVERSIONS,
          availablePatterns, LH_PATTERNS } from "./gen/exercise.js";
 import { PROGRESSIONS, generateChordDrill, progressionCategories,
-         VOICINGS, compPatterns, compLabel } from "./gen/chordprog.js";
+         CHORD_STAGES, CHORD_RANGES, CHORD_CONTOURS, CHORD_RHYTHMS } from "./gen/chordprog.js";
 import { MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, cycleOfFourths } from "./core/key.js";
 import { Stream } from "./stream.js";
 import { Library } from "./library.js";
@@ -21,6 +21,7 @@ import { OnsetInput } from "./input/onset.js";
 import { PerformanceMatcher } from "./input/performance.js";
 import { buildTapEvents, pianoRange, pianoNoteName, TapSightMatcher } from "./drills/tap-piano.js";
 import { analyzeVerticalIntervals } from "./interval-coach.js";
+import { fingeringSummary } from "./fingering.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -193,31 +194,41 @@ function fillProgressions(){
     sel.appendChild(g);
   });
 
-  const voi = $("voi");
-  Object.keys(VOICINGS).forEach(id => {
+  const stage = $("chordstage");
+  Object.keys(CHORD_STAGES).forEach(id => {
     const o = document.createElement("option");
     o.value = id;
-    o.textContent = VOICINGS[id].label + (VOICINGS[id].hands === 2 ? " ✋✋" : "");
-    voi.appendChild(o);
+    o.textContent = CHORD_STAGES[id].label;
+    stage.appendChild(o);
   });
-  voi.value = "shell";
+  stage.value = "seventh";
 
-  refreshComping();
-}
-
-/* Comping 節奏只有 4/4 有完整的型；走路低音是獨立選項，會蓋掉 voicing 的右手 */
-function refreshComping(){
-  const sel = $("comp"), prev = sel.value;
-  sel.innerHTML = "";
-  compPatterns("4/4").forEach(id => {
+  const range = $("chordrange");
+  Object.keys(CHORD_RANGES).forEach(id => {
     const o = document.createElement("option");
-    o.value = id; o.textContent = compLabel(id);
-    sel.appendChild(o);
+    o.value = id;
+    o.textContent = CHORD_RANGES[id].label;
+    range.appendChild(o);
   });
-  const w = document.createElement("option");
-  w.value = "walking"; w.textContent = "走路低音（雙手）✋✋";
-  sel.appendChild(w);
-  sel.value = Array.from(sel.options).some(o => o.value === prev) ? prev : "whole";
+  range.value = "one";
+
+  const contour = $("chordcontour");
+  Object.keys(CHORD_CONTOURS).forEach(id => {
+    const o = document.createElement("option");
+    o.value = id;
+    o.textContent = CHORD_CONTOURS[id].label;
+    contour.appendChild(o);
+  });
+  contour.value = "up";
+
+  const rhythm = $("chordrhythm");
+  Object.keys(CHORD_RHYTHMS).forEach(id => {
+    const o = document.createElement("option");
+    o.value = id;
+    o.textContent = CHORD_RHYTHMS[id].label;
+    rhythm.appendChild(o);
+  });
+  rhythm.value = "eighth";
 }
 
 function refreshChordKeys(){
@@ -292,6 +303,9 @@ function setBpm(v){
   $("tempo").value = String(b);
   $("temporead").textContent = String(b);
   $("bpmread").textContent = String(b);
+  $("toptemporange").value = String(b);
+  // 預設清單用於快速選速；拉桿可保留每一 BPM 的微調，不強迫跳回最近預設。
+  $("toptempo").value = Array.from($("toptempo").options).some((option) => Number(option.value) === b) ? String(b) : "";
   if (Metro.on) Metro.bpm = b;
   return b;
 }
@@ -427,6 +441,7 @@ function drawOpts(){
     showNames: $("shownames").checked,
     showHarmony: $("showharm").checked,
     showChords: $("showchords").checked,
+    showFingering: $("showfingering").checked,
     repeat: isLoop(),
     maxHeight: rowMaxHeight(),
     zoom: parseInt($("zoom").value, 10) / 100
@@ -493,6 +508,8 @@ function renderRead(){
   }
   $("sheetTitle").textContent = "視譜練習";
   $("sheetSub").textContent = describe(cur);
+  renderFingeringGuide(cur);
+  renderChordCoach(null);
   $("answer").hidden = true;
   buildBeatStrip(cur.beats);
   renderReview();
@@ -500,6 +517,34 @@ function renderRead(){
   renderPracticePiano();
   renderCoach();
   if (!Metro.on && trainingMode() === "interval") updateCursor(intervalCursorPosition());
+}
+
+function renderFingeringGuide(ex){
+  const visible = state.mode === "read" && !!ex && $("showfingering").checked;
+  $("fingerguide").hidden = !visible;
+  $("fingerguide").textContent = visible ? fingeringSummary(ex) : "";
+}
+
+function renderChordCoach(drill){
+  const box = $("chordcoach");
+  if (state.mode !== "chord" || !drill){ box.hidden = true; box.innerHTML = ""; return; }
+  const seen = new Set();
+  const lessons = (drill.systems[0]?.lessons || []).filter(item => {
+    if (seen.has(item.label)) return false;
+    seen.add(item.label); return true;
+  });
+  const showActual = state.revealed && $("shownotes").checked;
+  const extensionLabel = drill.extensions ? "外音開啟" : "外音關閉";
+  box.innerHTML =
+    '<div class="chord-coach-head"><b>讀法：根音 → 3、7 → 外音 → 分解</b><span>' +
+      esc(CHORD_STAGES[drill.stage].short + " · " + CHORD_RANGES[drill.range].short + " · " + extensionLabel + " · " + CHORD_RHYTHMS[drill.rhythm].label) + '</span></div>' +
+    '<div class="chord-coach-cards">' + lessons.map(item =>
+      '<div class="chord-card"><strong>' + esc(item.label) + '</strong>' +
+      '<span>目標 ' + esc(item.targetDegrees.join("–")) + '　' +
+        (drill.extensions ? '加入外音 ' + esc(item.colorDegrees.join("、")) : '七以上外音關閉') + '</span>' +
+      '<span class="actual">' + (showActual ? esc(item.targetNotes.join(" · ")) : '先從代號推算，按「看答案」核對') + '</span></div>'
+    ).join("") + '</div>';
+  box.hidden = false;
 }
 
 /* 段落結束：下一列升上來（它已經畫好了），舊的那一列拿去畫新的下一段。
@@ -543,12 +588,17 @@ function renderChord(){
   });
   state.plans[0] = state.plan;
   state.layouts[0] = state.plan.layout;      // 游標要靠這個定位，忘了存就會卡在原點
-  $("sheetTitle").textContent = "爵士和弦練習";
+  $("sheetTitle").textContent = "和弦代號分解練習";
+  renderFingeringGuide(null);
+  renderChordCoach(d);
   $("sheetSub").textContent = [
     d.label,
-    VOICINGS[d.cfg.style] ? VOICINGS[d.cfg.style].label : d.cfg.style,
-    compLabel(d.cfg.comp),
-    d.grand ? "雙手" : "左手",
+    CHORD_STAGES[d.stage].short,
+    CHORD_RANGES[d.range].short,
+    d.extensions ? "外音開啟" : "外音關閉",
+    CHORD_CONTOURS[d.contour].label,
+    CHORD_RHYTHMS[d.rhythm].label,
+    "左手根音＋右手分解",
     d.systems.map(s => s.tonic.shortName).join(" → "),
     "#" + d.seed.toString(36)
   ].filter(Boolean).join(" · ");
@@ -610,6 +660,7 @@ function openReview(i){
   $("stage").classList.add("reviewing");
   state.plan = paintRow(state.nowRow, ex, "回顧 · 第 " + (i + 1) + " 段");
   $("sheetSub").textContent = describe(ex);
+  renderFingeringGuide(ex);
   renderReview();
   renderPracticePiano();
 }
@@ -1008,6 +1059,7 @@ function openLibraryEntry(entry){
   $("stage").classList.add("reviewing");
   state.plan = paintRow(state.nowRow, ex, "複習清單 · " + entry.keyName);
   $("sheetSub").textContent = describe(ex);
+  renderFingeringGuide(ex);
   $("revback").hidden = false;
   $("review").hidden = false;
   syncMarkButton();
@@ -1830,14 +1882,10 @@ function stopCursor(){
 
 function renderAnswerBox(){
   const box = $("answer");
-  if (state.mode !== "chord" || !state.revealed){ box.hidden = true; return; }
-  box.innerHTML = state.drill.systems.map(s =>
-    '<div><span class="dim">' + s.tonic.shortName + '&nbsp;&nbsp;</span>' +
-    s.measures.map(m => "<b>" + m.label + "</b> " + m.names)
-              .join('<span class="dim">&nbsp; │ &nbsp;</span>') +
-    "</div>"
-  ).join("");
-  box.hidden = false;
+  // 和弦拆解卡與揭曉後的譜面已經同時提供級數、音名與實際節奏；
+  // 舊答案列只會重複資訊並吃掉 iPad 橫向時最珍貴的譜面高度。
+  box.innerHTML = "";
+  box.hidden = true;
 }
 
 function redraw(){
@@ -1926,8 +1974,11 @@ function generate(opts){
       order: $("korder").value,
       fixed: $("kfixed").value,
       count: parseInt($("ncyc").value, 10),
-      style: $("voi").value,
-      comp: $("comp").value,
+      stage: $("chordstage").value,
+      extensions: $("chordextensions").checked,
+      range: $("chordrange").value,
+      contour: $("chordcontour").value,
+      rhythm: $("chordrhythm").value,
       ts: "4/4",
       seed: (o.sameSeed && state.drill) ? state.drill.seed : undefined
     };
@@ -2333,11 +2384,11 @@ function bind(){
   // 換流程不必換題目 —— 只是重畫（反覆記號、預讀那一列）並歸零遍數
   $("flow").addEventListener("change", () => { syncFlow(); redraw(); });
   $("reps").addEventListener("change", () => { state.loopCount = 0; });
-  ["shownames", "showharm", "showchords"].forEach(id =>
+  ["shownames", "showharm", "showchords", "showfingering"].forEach(id =>
     $(id).addEventListener("change", () => { redraw(); updateRevealButton(); }));
 
   $("prog").addEventListener("change", () => { refreshChordKeys(); generate(); });
-  ["korder", "kfixed", "ncyc", "voi", "comp"].forEach(id =>
+  ["korder", "kfixed", "ncyc", "chordstage", "chordrange", "chordextensions", "chordcontour", "chordrhythm"].forEach(id =>
     $(id).addEventListener("change", () => generate()));
   $("swing").addEventListener("input", function(){
     const v = parseInt(this.value, 10) / 100;
@@ -2349,6 +2400,10 @@ function bind(){
   $("revealed").addEventListener("change", () => { state.revealed = $("revealed").checked; redraw(); updateRevealButton(); });
 
   $("tempo").addEventListener("input", function(){ setBpm(parseInt(this.value, 10)); });
+  $("toptemporange").addEventListener("input", function(){ setBpm(parseInt(this.value, 10)); });
+  $("toptempo").addEventListener("change", function(){
+    if (this.value) setBpm(parseInt(this.value, 10));
+  });
   // 數字框讓人邊打邊清空，所以只在打完（change / blur）時才夾回合法範圍
   $("bpm").addEventListener("input", function(){
     const v = parseInt(this.value, 10);

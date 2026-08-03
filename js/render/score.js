@@ -106,7 +106,7 @@ function buildNote(item, key){
   return n;
 }
 
-function collectPlan(plan, items, vfnotes, base){
+function collectPlan(plan, items, vfnotes, base, meta){
   var t = base;
   for (var i = 0; i < items.length; i++){
     var it = items[i], d = DUR[it.dur];
@@ -114,7 +114,12 @@ function collectPlan(plan, items, vfnotes, base){
       var gid = null;
       try { gid = "vf-" + vfnotes[i].getAttribute("id"); } catch (e) {}
       var src = (it.chordNotes && it.chordNotes.length) ? it.chordNotes : [it.note];
-      plan.events.push({t:t, d:d, midi: src.map(midiOf), gid:gid});
+      plan.events.push({
+        t:t, d:d, midi:src.map(midiOf), gid:gid,
+        hand:meta && meta.hand ? meta.hand : null,
+        bar:meta && meta.bar !== undefined ? meta.bar : null,
+        beat:t - base
+      });
     }
     t += d;
   }
@@ -241,11 +246,15 @@ export function drawExercise(el, ex, opts){
       vTop.draw(ctx, st);
       if (vBot) vBot.draw(ctx, sb);
 
-      collectPlan(plan, md.top, topNotes, mi * ex.beats);
-      if (botNotes && md.bottom) collectPlan(plan, md.bottom, botNotes, mi * ex.beats);
+      collectPlan(plan, md.top, topNotes, mi * ex.beats,
+                  {hand:(grand || ex.hands === "rh" ? "right" : "left"), bar:mi});
+      if (botNotes && md.bottom){
+        collectPlan(plan, md.bottom, botNotes, mi * ex.beats, {hand:"left", bar:mi});
+      }
 
       plan.layout.push({
         bar: mi, x: st.getX(), y: st.getY(), w: w,
+        noteX: st.getNoteStartX(), noteW: Math.max(28, st.getX() + w - st.getNoteStartX() - 10),
         h: (sb ? sb.getBottomY() : st.getBottomY()) - st.getY()
       });
 

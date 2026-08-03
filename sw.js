@@ -7,7 +7,7 @@
  *     VexFlow 有 0.95 MB，而且幾乎不會變，沒必要每次都上網要。
  */
 
-const VERSION = "putai-v5";
+const VERSION = "putai-v8";
 const ASSETS = [
   "./",
   "./index.html",
@@ -16,6 +16,7 @@ const ASSETS = [
   "./css/app.css",
   "./vendor/vexflow.js",
   "./js/main.js",
+  "./js/interval-coach.js",
   "./js/stream.js",
   "./js/library.js",
   "./js/core/rng.js",

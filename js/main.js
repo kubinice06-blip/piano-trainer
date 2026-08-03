@@ -12,6 +12,7 @@ import { MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, cycleOfFourths } from "./core/key.js"
 import { Stream } from "./stream.js";
 import { Library } from "./library.js";
 import { generateExercise } from "./gen/exercise.js";
+import { analyzeVerticalIntervals } from "./interval-coach.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -32,7 +33,53 @@ const state = {
   libId: null,         // 目前這一段在長期紀錄裡的 id
   practiceStart: 0,    // 這一輪節拍器開始的時間，用來累計練習時數
   playAlongCycle: 0,   // 和弦模式跟播到第幾輪
-  loopCount: 0         // 重複同一段時已經彈完第幾遍
+  loopCount: 0,        // 重複同一段時已經彈完第幾遍
+  training: {
+    mode: "free",
+    skeletonStep: 0,
+    manualBeat: 0,
+    intervalReveal: false,
+    intervalAnswered: false,
+    savedFlow: null,
+    run: {stops:0, leftDrops:0, omissions:0}
+  }
+};
+
+const TRAINING = {
+  free: {
+    title:"自由視奏",
+    mini:"保留目前設定，正常產生視譜題。"
+  },
+  slice: {
+    title:"垂直切片",
+    mini:"橘色框一次只圈一拍；不要讀完整右手才回頭找左手。",
+    cue:"每一拍先確認左手地標，再把右手形狀一起收入。"
+  },
+  interval: {
+    title:"垂直音程",
+    mini:"每拍一音；先說出左右手各自的方向與音程，再判斷同向或反向。",
+    cue:"先看形狀作答，不要逐顆翻譯音名；按揭曉才核對。"
+  },
+  skeleton: {
+    title:"骨架三層",
+    mini:"先保留完整左手、淡化右手資訊，再逐層恢復原譜。",
+    cue:"左手先維持時間軸；右手從每小節一音，逐步加回。"
+  },
+  ahead: {
+    title:"一拍超前",
+    mini:"橘框是手正在彈的拍，藍框是眼睛應該看的下一拍。",
+    cue:"手留在橘框，眼睛移到藍框；只練領先一拍。"
+  },
+  flow: {
+    title:"不中斷挑戰",
+    mini:"手動完成一段後自評停頓、左手掉拍與省略音。",
+    cue:"錯音不回頭；左手失聯時守住低音，或在下一個強拍再加入。"
+  },
+  leftmap: {
+    title:"左手定位",
+    mini:"產生低密度低音譜表題，眼睛留在譜上、左手直接找鍵。",
+    cue:"從地標音與黑鍵群定位，不要每顆音都先翻成音名。"
+  }
 };
 
 /* ---------- 選單填充 ---------- */
@@ -102,7 +149,12 @@ function refreshLhPatterns(){
   auto.value = ""; auto.textContent = "隨機（依難度）";
   sel.appendChild(auto);
 
-  availablePatterns(level, ts).forEach(id => {
+  const ids = availablePatterns(level, ts);
+  // 垂直音程是刻意的教練題：即使目前級數較低，也要能指定同向／反向聲部。
+  if (state.training.mode === "interval"){
+    ["parallel", "contrary"].forEach(id => { if (!ids.includes(id)) ids.push(id); });
+  }
+  ids.forEach(id => {
     const o = document.createElement("option");
     o.value = id;
     o.textContent = LH_PATTERNS[id].label;
@@ -224,6 +276,273 @@ function setBpm(v){
 
 function isLoop(){ return state.mode === "read" && $("flow").value === "loop"; }
 
+/* ---------- 讀譜教練 ---------- */
+
+function trainingMode(){ return state.training.mode; }
+
+function usesBeatSlices(){
+  return state.mode === "read" && ["slice", "interval", "ahead", "flow"].includes(trainingMode());
+}
+
+function skeletonEventVisible(e){
+  if (trainingMode() !== "skeleton" || !e || e.hand !== "right") return true;
+  if (state.training.skeletonStep >= 2) return true;
+  if (state.training.skeletonStep === 0) return Math.abs(e.beat) < 0.001;
+  return Math.abs(e.beat - Math.round(e.beat)) < 0.001;
+}
+
+function applyTrainingPresentation(row, plan){
+  if (!row || !plan || !plan.events) return;
+  plan.events.forEach(e => {
+    if (!e.gid) return;
+    const el = document.getElementById(e.gid);
+    if (!el) return;
+    el.classList.remove("coach-muted", "coach-left-focus");
+    if (trainingMode() === "skeleton"){
+      if (e.hand === "left") el.classList.add("coach-left-focus");
+      if (!skeletonEventVisible(e)) el.classList.add("coach-muted");
+    } else if (trainingMode() === "leftmap" && e.hand === "left"){
+      el.classList.add("coach-left-focus");
+    }
+  });
+}
+
+function currentPlaybackPlan(){
+  const p = state.plan || {events:[], total:0, layout:[]};
+  if (state.mode !== "read" || trainingMode() !== "skeleton") return p;
+  return Object.assign({}, p, {events:p.events.filter(skeletonEventVisible)});
+}
+
+function coachButton(label, fn, opts){
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "coach-btn" + (opts && opts.primary ? " primary" : "") +
+                (opts && opts.danger ? " danger" : "");
+  b.textContent = label;
+  if (opts && opts.pressed !== undefined) b.setAttribute("aria-pressed", opts.pressed ? "true" : "false");
+  b.addEventListener("click", fn);
+  $("coachactions").appendChild(b);
+  return b;
+}
+
+function currentTrainingBeatCount(){
+  const ex = state.stream && state.stream.current();
+  return ex ? ex.cfg.bars * ex.beats : 0;
+}
+
+function manualTrainingPosition(){
+  const ex = state.stream && state.stream.current();
+  if (!ex) return 0;
+  return state.stream.segStartBar * ex.beats + state.training.manualBeat + 0.001;
+}
+
+function moveTrainingBeat(delta){
+  const total = currentTrainingBeatCount();
+  if (!total) return;
+  state.training.manualBeat = Math.max(0, Math.min(total - 1, state.training.manualBeat + delta));
+  state.training.intervalReveal = false;
+  state.training.intervalAnswered = false;
+  renderCoach();
+  if (!Metro.on) updateCursor(manualTrainingPosition());
+}
+
+function resetTrainingRun(){
+  state.training.run = {stops:0, leftDrops:0, omissions:0};
+}
+
+function addTrainingIssue(name){
+  if (state.training.run[name] === undefined) return;
+  state.training.run[name]++;
+  renderCoach();
+}
+
+function completeFlowRun(){
+  if (Metro.on) toggleMetro();
+  Library.recordCoach("flow", state.training.run);
+  resetTrainingRun();
+  generate();
+}
+
+function applyLeftMapPreset(){
+  if (Metro.on) toggleMetro();
+  $("lv").value = String(Math.min(2, parseInt($("lv").value, 10) || 2));
+  $("hands").value = "lh";
+  $("dens").value = "long";
+  $("bars").value = "4";
+  $("flow").value = "manual";
+  $("shownames").checked = false;
+  refreshLhPatterns();
+  syncFlow();
+  generate({fresh:true});
+}
+
+function applyIntervalPreset(kind){
+  if (Metro.on) toggleMetro();
+  const pattern = kind === "contrary" ? "contrary" : "parallel";
+  $("lv").value = pattern === "parallel" ? "2" : "3";
+  $("ts").value = "4/4";
+  $("hands").value = "both";
+  $("dens").value = "pulse";
+  $("bars").value = "4";
+  $("flow").value = "manual";
+  $("focus").value = pattern === "contrary" ? "leap" : "none";
+  $("shownames").checked = false;
+  refreshLhPatterns();
+  $("lhpat").value = pattern;
+  syncFlow();
+  state.training.manualBeat = 0;
+  state.training.intervalReveal = false;
+  state.training.intervalAnswered = false;
+  generate({fresh:true});
+}
+
+function currentIntervalItem(){
+  const ex = state.stream && state.stream.current();
+  if (!ex || !state.plan) return null;
+  return analyzeVerticalIntervals(state.plan, ex.beats, ex.cfg.bars)[state.training.manualBeat] || null;
+}
+
+function recordIntervalAnswer(correct){
+  const item = currentIntervalItem();
+  if (!item) return;
+  Library.recordInterval(correct, item.relation);
+  state.training.intervalAnswered = true;
+  state.training.intervalReveal = false;
+  if (correct) moveTrainingBeat(1);
+  else renderCoach();
+}
+
+function renderCoach(){
+  const mode = trainingMode();
+  const spec = TRAINING[mode] || TRAINING.free;
+  if ($("coachmini")) $("coachmini").textContent = spec.mini;
+
+  // 模式切換會重用同一個列容器；上一模式留下的框必須主動清掉。
+  state.rows.forEach(r => {
+    const cur = r.querySelector(".cursor");
+    const ahead = r.querySelector(".lookahead");
+    if (ahead && mode !== "ahead") ahead.hidden = true;
+    if (cur && !Metro.on && mode !== "slice" && mode !== "interval" && mode !== "ahead") cur.hidden = true;
+  });
+
+  const bar = $("coachbar");
+  if (!bar) return;
+  if (state.mode !== "read" || mode === "free" || state.reviewIdx !== -1){
+    bar.hidden = true;
+    state.rows.forEach(r => {
+      const a = r.querySelector(".lookahead");
+      if (a) a.hidden = true;
+    });
+    return;
+  }
+
+  bar.hidden = false;
+  $("coachtitle").textContent = spec.title;
+  $("coachcue").textContent = spec.cue;
+  $("coachactions").innerHTML = "";
+  const stat = $("coachstat");
+  stat.textContent = "";
+  stat.classList.remove("interval-answer", "is-revealed");
+
+  if (mode === "slice" || mode === "ahead"){
+    const total = currentTrainingBeatCount();
+    stat.textContent = "第 " + (state.training.manualBeat + 1) + " / " + total + " 拍";
+    coachButton("← 上一拍", () => moveTrainingBeat(-1));
+    coachButton("下一拍 →", () => moveTrainingBeat(1), {primary:true});
+    coachButton("回第一拍", () => {
+      state.training.manualBeat = 0; renderCoach();
+      if (!Metro.on) updateCursor(manualTrainingPosition());
+    });
+  } else if (mode === "interval"){
+    const total = currentTrainingBeatCount();
+    const item = currentIntervalItem();
+    const past = Library.intervalStats();
+    const accuracy = past.attempts ? Math.round(past.correct / past.attempts * 100) : 0;
+    const pattern = $("lhpat").value;
+    $("coachcue").textContent = "第 " + (state.training.manualBeat + 1) + " / " + total + " 拍・" +
+      (pattern === "contrary" ? "反向題" : "同向三／六度題") +
+      (past.attempts ? "・命中率 " + accuracy + "%（" + past.attempts + " 拍）" : "");
+    stat.classList.add("interval-answer");
+    if (state.training.intervalReveal && item){
+      stat.textContent = item.answer;
+      stat.classList.add("is-revealed");
+    } else {
+      stat.textContent = "先說：右手往哪裡、幾度？左手呢？兩手同向、反向、斜向，還是保持？";
+    }
+
+    coachButton("← 上一拍", () => moveTrainingBeat(-1));
+    if (state.training.intervalReveal){
+      coachButton("答對・下一拍", () => recordIntervalAnswer(true), {primary:true});
+      coachButton("答錯・再看", () => recordIntervalAnswer(false), {danger:true});
+    } else {
+      coachButton("揭曉音程", () => { state.training.intervalReveal = true; renderCoach(); }, {primary:true});
+      coachButton("跳過 →", () => moveTrainingBeat(1));
+    }
+    coachButton("同向題", () => applyIntervalPreset("parallel"), {pressed:pattern === "parallel"});
+    coachButton("反向題", () => applyIntervalPreset("contrary"), {pressed:pattern === "contrary"});
+  } else if (mode === "skeleton"){
+    const names = ["左手完整＋右手每小節一音", "左手完整＋右手每拍骨架", "完整原譜"];
+    stat.textContent = "目前：" + names[state.training.skeletonStep];
+    names.forEach((n, i) => coachButton(String(i + 1) + " · " + n, () => {
+      state.training.skeletonStep = i;
+      redraw();
+    }, {pressed:state.training.skeletonStep === i}));
+  } else if (mode === "flow"){
+    const r = state.training.run;
+    const past = Library.coachStats("flow");
+    const clean = past.attempts ? Math.round(past.clean / past.attempts * 100) : 0;
+    stat.textContent = "本段：停 " + r.stops + "・左手掉 " + r.leftDrops + "・省略 " + r.omissions +
+      (past.attempts ? "｜歷史不中斷率 " + clean + "%（" + past.attempts + " 段）" : "");
+    coachButton("停頓 +1", () => addTrainingIssue("stops"), {danger:true});
+    coachButton("左手掉拍 +1", () => addTrainingIssue("leftDrops"), {danger:true});
+    coachButton("省略音 +1", () => addTrainingIssue("omissions"));
+    coachButton("完成並換題", completeFlowRun, {primary:true});
+  } else if (mode === "leftmap"){
+    const ready = $("hands").value === "lh" && $("dens").value === "long";
+    stat.textContent = ready ? "定位題已套用：低音譜表・長音・手動換題" : "尚未套用定位題設定";
+    coachButton("套用左手定位題", applyLeftMapPreset, {primary:true});
+    coachButton($("shownames").checked ? "藏音名" : "核對音名", () => {
+      $("shownames").checked = !$("shownames").checked;
+      redraw();
+    });
+    coachButton("換一題", () => generate());
+  }
+}
+
+function setTrainingMode(mode){
+  const next = TRAINING[mode] ? mode : "free";
+  const prev = trainingMode();
+  if (Metro.on) toggleMetro();
+
+  if (prev === "flow" && next !== "flow" && state.training.savedFlow){
+    $("flow").value = state.training.savedFlow;
+    state.training.savedFlow = null;
+    syncFlow();
+  }
+  if (next === "flow" && prev !== "flow"){
+    state.training.savedFlow = $("flow").value;
+    $("flow").value = "manual";
+    syncFlow();
+  }
+
+  state.training.mode = next;
+  state.training.manualBeat = 0;
+  state.training.skeletonStep = 0;
+  state.training.intervalReveal = false;
+  state.training.intervalAnswered = false;
+  resetTrainingRun();
+  $("trainmode").value = next;
+  if (next === "interval"){
+    applyIntervalPreset("parallel");
+    return;
+  }
+  redraw();
+  renderCoach();
+  if (!Metro.on && (next === "slice" || next === "interval" || next === "ahead")){
+    updateCursor(manualTrainingPosition());
+  }
+}
+
 /* 一列譜可以用多高。頁面本身不捲，所以這是硬上限 ——
    連續流要同時擺兩段，每一段就只有一半的高度。
    放大超過 100% 時使用者是刻意要看大的，這時不設限，改由譜面區自己捲。 */
@@ -283,6 +602,7 @@ function paintRow(rowIdx, ex, tag){
   const plan = drawExercise(row.querySelector(".score"), ex, drawOpts());
   state.plans[rowIdx] = plan;
   state.layouts[rowIdx] = plan.layout;
+  applyTrainingPresentation(row, plan);
   return plan;
 }
 
@@ -294,7 +614,10 @@ function syncRows(){
     row.classList.toggle("is-now", isNow);
     row.classList.toggle("is-next", !isNow);
     row.classList.toggle("is-hidden", !isNow && flow !== "flow");
-    if (!isNow) row.querySelector(".cursor").hidden = true;
+    if (!isNow){
+      row.querySelector(".cursor").hidden = true;
+      row.querySelector(".lookahead").hidden = true;
+    }
   });
 }
 
@@ -313,6 +636,10 @@ function renderRead(){
   $("answer").hidden = true;
   buildBeatStrip(cur.beats);
   renderReview();
+  renderCoach();
+  if (!Metro.on && (trainingMode() === "slice" || trainingMode() === "interval" || trainingMode() === "ahead")){
+    updateCursor(manualTrainingPosition());
+  }
 }
 
 /* 段落結束：下一列升上來（它已經畫好了），舊的那一列拿去畫新的下一段。
@@ -320,6 +647,10 @@ function renderRead(){
 function advanceSegment(barsDone){
   const st = state.stream;
   st.advance(barsDone);
+  state.training.manualBeat = 0;
+  state.training.intervalReveal = false;
+  state.training.intervalAnswered = false;
+  resetTrainingRun();
   if ($("flow").value === "flow"){
     state.nowRow = 1 - state.nowRow;
     state.rows[state.nowRow].querySelector(".rowtag").textContent = "現在";
@@ -362,6 +693,7 @@ function renderChord(){
   ].filter(Boolean).join(" · ");
   renderAnswerBox();
   buildBeatStrip(4);
+  renderCoach();
 }
 
 /* ---------- 本次練習的段落存檔 ---------- */
@@ -414,10 +746,12 @@ function openReview(i){
   state.rows[state.nowRow].classList.add("is-now");
   state.rows[state.nowRow].classList.remove("is-next");
   state.rows[state.nowRow].querySelector(".cursor").hidden = true;
+  state.rows[state.nowRow].querySelector(".lookahead").hidden = true;
   $("stage").classList.add("reviewing");
   state.plan = paintRow(state.nowRow, ex, "回顧 · 第 " + (i + 1) + " 段");
   $("sheetSub").textContent = describe(ex);
   renderReview();
+  renderCoach();
 }
 
 function exitReview(){
@@ -569,12 +903,14 @@ function openLibraryEntry(entry){
   state.rows[state.nowRow].classList.add("is-now");
   state.rows[state.nowRow].classList.remove("is-next");
   state.rows[state.nowRow].querySelector(".cursor").hidden = true;
+  state.rows[state.nowRow].querySelector(".lookahead").hidden = true;
   $("stage").classList.add("reviewing");
   state.plan = paintRow(state.nowRow, ex, "複習清單 · " + entry.keyName);
   $("sheetSub").textContent = describe(ex);
   $("revback").hidden = false;
   $("review").hidden = false;
   syncMarkButton();
+  renderCoach();
   setDrawer(false);
 }
 
@@ -628,42 +964,71 @@ function updateCursor(posOverride){
   const row = state.rows[state.nowRow];
   if (!row) return;
   const el = row.querySelector(".cursor");
+  const ahead = row.querySelector(".lookahead");
   const live = (posOverride !== undefined) || Metro.on;
-  if (!live){ el.hidden = true; return; }
+  if (!live){ el.hidden = true; ahead.hidden = true; return; }
 
   const pos = (posOverride !== undefined) ? posOverride : Metro.position();
-  if (pos < 0){ el.hidden = true; return; }        // 預備拍期間不顯示
+  if (pos < 0){ el.hidden = true; ahead.hidden = true; return; } // 預備拍期間不顯示
 
   const layout = state.layouts[state.nowRow];
-  if (!layout || !layout.length){ el.hidden = true; return; }
+  if (!layout || !layout.length){ el.hidden = true; ahead.hidden = true; return; }
 
-  let bar;
+  let bar, beat = 0, beats = 4;
   if (state.mode === "read"){
     const ex = state.stream && state.stream.current();
-    if (!ex){ el.hidden = true; return; }
-    bar = state.stream.barInSegment(pos, ex.beats);
+    if (!ex){ el.hidden = true; ahead.hidden = true; return; }
+    beats = ex.beats;
+    const local = pos - state.stream.segStartBar * beats;
+    bar = Math.floor(local / beats);
+    beat = Math.max(0, Math.min(beats - 1, Math.floor(local - bar * beats)));
   } else {
     // 和弦模式沒有換段，就在整條進行上循環 —— 練 changes 本來就是一直繞
     const d = state.drill;
-    if (!d){ el.hidden = true; return; }
+    if (!d){ el.hidden = true; ahead.hidden = true; return; }
+    beats = d.beats;
     const n = Math.floor(pos / d.beats);
     bar = ((n % layout.length) + layout.length) % layout.length;
   }
-  if (bar < 0 || bar >= layout.length){ el.hidden = true; return; }
+  if (bar < 0 || bar >= layout.length){ el.hidden = true; ahead.hidden = true; return; }
 
   const L = layout[bar];
   const svg = row.querySelector(".score svg");
-  if (!svg){ el.hidden = true; return; }
+  if (!svg){ el.hidden = true; ahead.hidden = true; return; }
   // 版面座標是「邏輯單位」（譜面縮放前），還要再乘上 SVG 被 CSS 壓縮的比例
   const lw = (state.plans[state.nowRow] && state.plans[state.nowRow].lw) || svg.width.baseVal.value || 1;
   const scale = svg.getBoundingClientRect().width / lw;
   const top = row.querySelector(".score").offsetTop;
 
   el.hidden = false;
-  el.style.left   = (L.x * scale) + "px";
-  el.style.width  = (L.w * scale) + "px";
+  if (usesBeatSlices()){
+    const nx = L.noteX === undefined ? L.x : L.noteX;
+    const nw = L.noteW === undefined ? L.w : L.noteW;
+    el.style.left = ((nx + nw * beat / beats) * scale) + "px";
+    el.style.width = Math.max(8, nw / beats * scale) + "px";
+  } else {
+    el.style.left = (L.x * scale) + "px";
+    el.style.width = (L.w * scale) + "px";
+  }
   el.style.top    = (top + L.y * scale) + "px";
   el.style.height = (Math.max(40, L.h) * scale) + "px";
+
+  ahead.hidden = true;
+  if (state.mode === "read" && trainingMode() === "ahead"){
+    const nextLocal = bar * beats + beat + 1;
+    const nextBar = Math.floor(nextLocal / beats);
+    const nextBeat = nextLocal % beats;
+    if (nextBar >= 0 && nextBar < layout.length){
+      const A = layout[nextBar];
+      const anx = A.noteX === undefined ? A.x : A.noteX;
+      const anw = A.noteW === undefined ? A.w : A.noteW;
+      ahead.hidden = false;
+      ahead.style.left = ((anx + anw * nextBeat / beats) * scale) + "px";
+      ahead.style.width = Math.max(8, anw / beats * scale) + "px";
+      ahead.style.top = (top + A.y * scale) + "px";
+      ahead.style.height = (Math.max(40, A.h) * scale) + "px";
+    }
+  }
 }
 
 function cursorLoop(){
@@ -675,7 +1040,10 @@ function startCursor(){ if (!state.cursorRaf) cursorLoop(); }
 function stopCursor(){
   if (state.cursorRaf) cancelAnimationFrame(state.cursorRaf);
   state.cursorRaf = null;
-  state.rows.forEach(r => { r.querySelector(".cursor").hidden = true; });
+  state.rows.forEach(r => {
+    r.querySelector(".cursor").hidden = true;
+    r.querySelector(".lookahead").hidden = true;
+  });
 }
 
 function renderAnswerBox(){
@@ -751,6 +1119,10 @@ function generate(opts){
   state.revealed = $("revealed").checked;
   state.reviewIdx = -1;
   state.loopCount = 0;
+  state.training.manualBeat = 0;
+  state.training.intervalReveal = false;
+  state.training.intervalAnswered = false;
+  resetTrainingRun();
   $("stage").classList.remove("reviewing");
 
   if (state.mode === "read"){
@@ -824,7 +1196,8 @@ function setPlayLabel(on){
 /* 排在節拍器的同一個硬體時鐘上，所以第一顆音就對得準；
    用 setTimeout 去湊會漂，而且是聽得出來的那種漂。 */
 function startPlayAlong(){
-  if (!$("playalong").checked || !Metro.on || !state.plan.events.length) return;
+  const playPlan = currentPlaybackPlan();
+  if (!$("playalong").checked || !Metro.on || !playPlan.events.length) return;
   let startBeat;
   if (state.mode === "read"){
     startBeat = state.stream.segStartBar * (state.stream.current().beats || 4);
@@ -832,7 +1205,7 @@ function startPlayAlong(){
     const bars = (state.plans[0] && state.plans[0].layout.length) || 1;
     startBeat = state.playAlongCycle * bars * (state.drill ? state.drill.beats : 4);
   }
-  const ok = Audio.play(state.plan, currentBpm(), highlight, onPlayAlongEnd,
+  const ok = Audio.play(playPlan, currentBpm(), highlight, onPlayAlongEnd,
                         Metro.timeOfBeat(startBeat));
   if (ok) setPlayLabel(true);
 }
@@ -851,7 +1224,7 @@ function togglePlay(){
     Audio.stop(); highlight(null); setPlayLabel(false);
     return;
   }
-  const ok = Audio.play(state.plan, currentBpm(), highlight, () => setPlayLabel(false));
+  const ok = Audio.play(currentPlaybackPlan(), currentBpm(), highlight, () => setPlayLabel(false));
   if (!ok){ $("clipmeta").textContent = "沒有可播放的內容"; return; }
   setPlayLabel(true);
 }
@@ -941,6 +1314,9 @@ function toggleMetro(){
     $("clipmeta").textContent = "停止";
     const cells = $("beatstrip").children;
     for (let k = 0; k < cells.length; k++) cells[k].classList.remove("on");
+    if (trainingMode() === "slice" || trainingMode() === "interval" || trainingMode() === "ahead"){
+      updateCursor(manualTrainingPosition());
+    }
     return;
   }
   const cur = state.mode === "read" && state.stream ? state.stream.current() : null;
@@ -1063,6 +1439,7 @@ function bind(){
   $("fabgen").addEventListener("click", () => generate());
 
   $("swaphands").addEventListener("click", swapHands);
+  $("trainmode").addEventListener("change", function(){ setTrainingMode(this.value); });
 
   // 出題設定變了，整條佇列都要重來（下一段是用舊設定生的）
   ["lv", "ts", "hands"].forEach(id =>
@@ -1166,6 +1543,12 @@ function bind(){
     else if (k === "m"){ e.preventDefault(); toggleMetro(); }
     else if (k === "p"){ e.preventDefault(); togglePlay(); }
     else if (k === "h"){ e.preventDefault(); swapHands(); }
+    else if (e.key === "[" && (trainingMode() === "slice" || trainingMode() === "interval" || trainingMode() === "ahead")){
+      e.preventDefault(); moveTrainingBeat(-1);
+    }
+    else if (e.key === "]" && (trainingMode() === "slice" || trainingMode() === "interval" || trainingMode() === "ahead")){
+      e.preventDefault(); moveTrainingBeat(1);
+    }
     else if (e.key === "ArrowUp" || e.key === "ArrowDown"){
       e.preventDefault();
       const d = e.key === "ArrowUp" ? 1 : -1;
@@ -1193,6 +1576,7 @@ async function boot(){
   state.rows = [$("rowA"), $("rowB")];
   state.stream = new Stream(readCfg);
   Library.load();
+  state.training.mode = $("trainmode").value || "free";
   fillLevels();
   fillHands();
   fillDensity();

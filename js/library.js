@@ -29,7 +29,7 @@ function hashCfg(cfg){
 }
 
 function emptyStore(){
-  return {v: 1, entries: [], seconds: 0, startedAt: Date.now()};
+  return {v: 1, entries: [], seconds: 0, coach: {}, startedAt: Date.now()};
 }
 
 export const Library = {
@@ -41,6 +41,7 @@ export const Library = {
       const raw = localStorage.getItem(KEY);
       this.data = raw ? JSON.parse(raw) : emptyStore();
       if (!this.data || this.data.v !== 1 || !Array.isArray(this.data.entries)) this.data = emptyStore();
+      if (!this.data.coach || typeof this.data.coach !== "object") this.data.coach = {};
     } catch (e) {
       // iOS 在 file:// 或無痕模式下可能整個不給用。功能降級，但不能讓程式掛掉。
       this.available = false;
@@ -120,6 +121,51 @@ export const Library = {
     if (!(s > 0)) return;
     this.data.seconds = (this.data.seconds || 0) + s;
     this.save();
+  },
+
+  /** 讀譜教練的自評。沒有 MIDI 輸入時，停頓與漏音由使用者按鈕回報。 */
+  recordCoach(mode, result){
+    if (!mode || mode === "free") return null;
+    const c = this.data.coach[mode] = this.data.coach[mode] || {
+      attempts:0, clean:0, stops:0, leftDrops:0, omissions:0, at:0
+    };
+    const r = result || {};
+    c.attempts++;
+    c.stops += Math.max(0, r.stops || 0);
+    c.leftDrops += Math.max(0, r.leftDrops || 0);
+    c.omissions += Math.max(0, r.omissions || 0);
+    if (!(r.stops || r.leftDrops)) c.clean++;
+    c.at = Date.now();
+    this.save();
+    return c;
+  },
+
+  coachStats(mode){
+    return (this.data.coach && this.data.coach[mode]) || {
+      attempts:0, clean:0, stops:0, leftDrops:0, omissions:0, at:0
+    };
+  },
+
+  /** 垂直音程以「每拍一次判斷」統計，並分開記錄方向關係。 */
+  recordInterval(correct, relation){
+    const c = this.data.coach.interval = this.data.coach.interval || {
+      attempts:0, correct:0, wrong:0, relations:{}, at:0
+    };
+    if (!c.relations || typeof c.relations !== "object") c.relations = {};
+    c.attempts++;
+    if (correct) c.correct++; else c.wrong++;
+    const key = relation || "未分類";
+    const r = c.relations[key] = c.relations[key] || {attempts:0, correct:0};
+    r.attempts++;
+    if (correct) r.correct++;
+    c.at = Date.now();
+    this.save();
+    return c;
+  },
+
+  intervalStats(){
+    const c = this.data.coach && this.data.coach.interval;
+    return c || {attempts:0, correct:0, wrong:0, relations:{}, at:0};
   },
 
   clear(){

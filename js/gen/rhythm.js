@@ -89,6 +89,7 @@ export const NOTE_DENSITY = [
   {id:"auto",    label:"隨難度",               bias: 0,   minTier:0},
   {id:"long",    label:"長音為主（慢慢讀）",    bias:-2.2, minTier:0},
   {id:"quarter", label:"四分音符為主",          bias:-1.0, minTier:0},
+  {id:"pulse",   label:"每拍一音（垂直音程）",  bias: 0,   minTier:0, exactPulse:true},
   {id:"eighth",  label:"八分音符多一點",        bias: 1.6, minTier:2},
   {id:"varied",  label:"長短交錯（附點・切分）", bias: 0.5, minTier:4, varied:true},
   {id:"16th",    label:"十六分音符多一點",      bias: 2.6, minTier:5}
@@ -106,6 +107,9 @@ export function effectiveTier(level, densityId){
 
 export function rhythmBank(ts, level, densityId){
   var info = tsInfo(ts);
+  if (densityMode(densityId).exactPulse){
+    return [Array.from({length:info.beats}, function(){ return "q"; })];
+  }
   var n = Math.min(effectiveTier(level, densityId), info.bank.length);
   var out = [];
   for (var i = 0; i < n; i++) out = out.concat(info.bank[i]);
@@ -148,7 +152,9 @@ export function pickRhythm(rng, bank, densityId){
 
 /* 動機變形時「把長音拆碎」的機率。偏短音就拆得兇一點。 */
 export function splitChance(densityId){
-  return Math.max(0.05, Math.min(0.9, 0.45 + densityMode(densityId).bias * 0.22));
+  var m = densityMode(densityId);
+  if (m.exactPulse) return 0;
+  return Math.max(0.05, Math.min(0.9, 0.45 + m.bias * 0.22));
 }
 
 /* 節奏型 → 每個音的起始拍 */

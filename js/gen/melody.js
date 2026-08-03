@@ -156,10 +156,24 @@ function chordDegreesOf(key, chord){
  *   - 優先級進，大跳之後反向
  *   - 跟著輪廓弧線走，高點只有一個
  */
+/* 樂句的輪廓形狀。只有拱形的話，每一題都是「從低處爬上去再落回來」——
+   起頭永遠停在同一個位置，十題聽起來像同一句。拱形仍然最常見（權重加倍），
+   但下行、先落後起、一路往上也都要出現，開頭才會真的不一樣。 */
+const CONTOURS = ["arch", "arch", "descend", "valley", "rise"];
+
+function contourAt(kind, t, peak){
+  if (kind === "descend") return 1 - t;
+  if (kind === "rise")    return t;
+  if (kind === "valley")  return Math.abs(2 * t - 1);
+  return t <= peak ? (peak ? t / peak : 1)
+                   : 1 - (t - peak) / Math.max(1e-6, 1 - peak);
+}
+
 function buildSkeleton(rng, key, H, pool, degs, anchors, startIdx, lv, F, clef){
   const span = pool.length;
   const nAnchor = anchors.length;
-  const climax = Math.max(1, Math.min(nAnchor - 2, Math.round(nAnchor * 0.62)));
+  const shape = rng.pick(CONTOURS);
+  const peak = 0.45 + rng.next() * 0.3;      // 高點落在四成半到七成半之間
   // 加線音練習把輪廓推到音域的兩端，其餘維持在中間偏上（唱得出來的位置）
   const lowC = Math.round(span * (F.ledger ? 0.06 : 0.30));
   const highC = Math.round(span * (F.ledger ? 0.96 : 0.80));
@@ -175,8 +189,7 @@ function buildSkeleton(rng, key, H, pool, degs, anchors, startIdx, lv, F, clef){
     const {chord, isLast} = anchors[a];
     const tones = chordDegreesOf(key, chord);
     const target = Math.round(lowC + (highC - lowC) *
-      (a <= climax ? (climax ? a / climax : 1)
-                   : 1 - (a - climax) / Math.max(1, nAnchor - 1 - climax)) * 0.9);
+      contourAt(shape, nAnchor > 1 ? a / (nAnchor - 1) : 0, peak) * 0.9);
 
     // 最後一個骨架音收在主和弦的根音或三音，聽起來才算話講完
     let allowed = tones;
@@ -186,8 +199,11 @@ function buildSkeleton(rng, key, H, pool, degs, anchors, startIdx, lv, F, clef){
     for (let j = Math.max(0, cur - lv.leap); j <= Math.min(span - 1, cur + lv.leap); j++){
       if (allowed.indexOf(degs[j]) < 0) continue;
       const step = j - cur, d = Math.abs(step);
-      // 原地不動永遠是停滯；其餘各音程的偏好由「強化練習」那張表決定
-      let sc = F.skel[Math.min(d, 6)];
+      // 原地不動永遠是停滯；其餘各音程的偏好由「強化練習」那張表決定。
+      // 但第一個骨架音沒有「上一個音」可以承接 —— 這時用音程偏好評分，
+      // 等於在量「離那個隨機起點多遠」，開頭就被釘死在同一批音上。
+      // 起頭改成只看輪廓要求的高度，主和弦的三個音才都有機會當開頭。
+      let sc = (a === 0) ? 6 : F.skel[Math.min(d, 6)];
 
       // 欠解決的音：必須往指定方向級進
       if (pendingResolve){
@@ -205,7 +221,7 @@ function buildSkeleton(rng, key, H, pool, degs, anchors, startIdx, lv, F, clef){
       if (isAugmentedSecond(cand, prev)) sc -= 14;                             // 小調的 ♭6→♯7
       // 練加線音就往五線外走，但不能全部都在外面 —— 線上的音是眼睛的參考點
       if (F.ledger && needsLedger(cand, clef)) sc += 3.5;
-      sc += 3 * (1 - Math.abs(j - target) / span);
+      sc += (a === 0 ? 5 : 3) * (1 - Math.abs(j - target) / span);
       cands.push({j, sc});
     }
 
@@ -264,8 +280,13 @@ function movePlan(rng, disp, steps, u){
   } else {
     for (let i = 0; i < need; i++) moves.push(s);
     let extra = steps - need;
-    // 多出來的音成對來回 —— u=1 是鄰音，u=2 是三度的來回跳
-    while (extra >= 2){ moves.push(-s * u); moves.push(s * u); extra -= 2; }
+    // 多出來的音成對來回 —— u=1 是鄰音，u=2 是三度的來回跳。
+    // 永遠用二度的話，空隙一長就變成「do ti do ti」這種原地擺盪；
+    // 偶爾換成三度，同樣回得到原位，線條卻不再只是抖動。
+    while (extra >= 2){
+      const w = (u === 1 && rng.chance(0.35)) ? 2 : u;
+      moves.push(-s * w); moves.push(s * w); extra -= 2;
+    }
     if (extra === 1){
       // 奇數：把一步撐大，再補一個反向，位移總和不變（逃逸音）
       const i = moves.indexOf(s);
@@ -328,7 +349,11 @@ export function melodyLine(rng, cfg, H, key, pool, degs, rangeCenter){
   /* 1. 標出骨架位置：每個音符落在哪一拍、屬於哪個和弦、是不是骨架音。
         骨架 = 和弦剛換的位置 + 小節的強拍。
         琶音練習把每個音都當骨架，於是整條都落在和弦音上 —— 那就是琶音。 */
-  const pStruct = Math.max(0, Math.min(1, 0.85 + F.struct));
+  /* 強拍幾乎必成骨架音的話，骨架之間永遠只隔一個音，加花就只填得出經過音 ——
+     整段因此全是級進的音階片段，開頭老是「do re mi do」這種形狀。
+     放鬆一點，空隙才會出現兩三個音的位置，鄰音、迴音、三度來回才有機會長出來。
+     和弦換位置仍然一律是骨架音，所以和聲的落地感不受影響。 */
+  const pStruct = Math.max(0, Math.min(1, 0.62 + F.struct));
   const slots = [];              // 全曲攤平：{bar, k, beat, chord, structural}
   for (let mi = 0; mi < barCount; mi++){
     const bts = beatsOf(pats[mi]);
@@ -353,7 +378,9 @@ export function melodyLine(rng, cfg, H, key, pool, degs, rangeCenter){
   }));
 
   /* 2. 骨架 */
-  let start = rangeCenter;
+  // 起始位置寫死在音域中央的話，第一個骨架音永遠落在同一顆音上 ——
+  // 那正是「每一題開頭都一樣」的來源。接續上一段時不抖動，音域才接得起來。
+  let start = Math.max(0, Math.min(pool.length - 1, rangeCenter + rng.int(9) - 4));
   if (cfg.startIndex >= 0 && cfg.startIndex < pool.length) start = cfg.startIndex;
   const skel = buildSkeleton(rng, key, H, pool, degs, anchors, start, lv, F, cfg.__clef);
 

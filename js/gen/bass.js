@@ -143,6 +143,16 @@ function diatonicBelow(key, note, steps, chord){
   return alt(key, N(l, key.accFor(l), o), chord);
 }
 
+/* 兩手 2:1 的左手寫法。數字是和弦成員的索引：0 是低音，往上依序 1、2。
+   同時含上行與下行，一整段才不會只剩同一個音程。 */
+const HALF_NOTE_SHAPES = [
+  [0, 2],   // 根音 → 五音（上行五度）
+  [0, 2],   // 這個最穩，權重加倍
+  [0, 1],   // 根音 → 三音
+  [2, 0],   // 五音 → 根音（下行）
+  [1, 0]    // 三音 → 根音（下行）
+];
+
 /* ---------- 各種模式 ---------- */
 
 function patternNotes(rng, name, ctx){
@@ -183,13 +193,18 @@ function patternNotes(rng, name, ctx){
          這裡刻意不跟著和聲節奏走 —— 一小節換兩個和弦也照樣是兩個二分音符。
          合手練習的重點是「左手的落點永遠可預測」，眼睛才有餘裕垂直讀譜；
          落點一旦跟著和聲忽快忽慢，這個練習就失去意義了。
-         三拍子分不成兩半，整小節就是一個附點二分。 */
+         三拍子分不成兩半，整小節就是一個附點二分。
+
+         固定的是「落點」，不是「音程」：寫死成根音→五音的話，一整段左手
+         就只剩同一個五度，讀起來等於沒在讀。每小節改抽一種寫法，
+         上行下行、五度三度都會出現，可預測性仍然完全保留。 */
       const span = (beats === 3) ? 3 : 2;
+      const d = (span === 3) ? "hd" : "h";
+      const shape = rng.pick(HALF_NOTE_SHAPES);
+      let k = 0;
       for (let b = 0; b < beats; b += span){
-        const d = (span === 3) ? "hd" : "h";
-        // 根音、五音交替，左手才不會整段咬著同一個音
-        const pickIdx = ((b / span) % 2 === 0) ? 0 : 2;
-        emitFor(chordAt(H, mi, b), d, ch => mem(ch, pickIdx));
+        emitFor(chordAt(H, mi, b), d, ch => mem(ch, shape[k % shape.length]));
+        k++;
       }
 
     } else if (name === "rootFifth"){

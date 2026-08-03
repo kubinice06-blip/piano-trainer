@@ -17,6 +17,22 @@ function intervalNotes(ex){
     .filter(item => !item.rest && item.note).map(item => dIdx(item.note));
 }
 
+/* 樂句開頭的形狀（前四個音的譜面位置）。
+   一段接一段地讀時，最容易察覺的重複就是「每一題都從同一串音開始」，
+   所以開頭要跟前幾段比對過才放行 —— 光比對和聲進行擋不掉這件事。 */
+function openingSignature(ex){
+  const which = ex.melodyOn === "bottom" ? "bottom" : "top";
+  const out = [];
+  for (const measure of ex.measures){
+    for (const item of (measure[which] || measure.top || [])){
+      if (item.rest || !item.note) continue;
+      out.push(dIdx(item.note));
+      if (out.length === 4) return out.join(",");
+    }
+  }
+  return out.join(",");
+}
+
 function intervalDifference(a, b){
   const left = intervalNotes(a), right = intervalNotes(b);
   if (!left.length || left.length !== right.length) return {notes:left.length + right.length, motions:left.length + right.length};
@@ -72,8 +88,11 @@ export class Stream {
       ex = best;
       cfg.seed = ex.seed;
     } else if (seed === undefined && !fixedSeed){
-      const recent = this.recentProgressions();
-      for (let t = 0; t < 6 && recent.indexOf(ex.harmony.tokens.join(" ")) >= 0; t++){
+      const progressions = this.recentProgressions();
+      const openings = this.recentOpenings();
+      for (let t = 0; t < 8; t++){
+        if (progressions.indexOf(ex.harmony.tokens.join(" ")) < 0 &&
+            openings.indexOf(openingSignature(ex)) < 0) break;
         cfg.seed = randomSeed();
         ex = generateExercise(cfg);
       }
@@ -109,6 +128,14 @@ export class Stream {
     const out = [];
     this.queue.forEach(ex => { if (ex && ex.harmony) out.push(ex.harmony.tokens.join(" ")); });
     this.history.slice(-2).forEach(h => { if (h.tokens) out.push(h.tokens); });
+    return out;
+  }
+
+  /* 同上，但比的是樂句開頭 */
+  recentOpenings(){
+    const out = [];
+    this.queue.forEach(ex => { if (ex) out.push(openingSignature(ex)); });
+    this.history.slice(-3).forEach(h => { if (h.opening) out.push(h.opening); });
     return out;
   }
 
@@ -180,6 +207,7 @@ export class Stream {
       cfg: ex.usedCfg,
       key: ex.key.displayName,
       tokens: ex.harmony ? ex.harmony.tokens.join(" ") : "",
+      opening: openingSignature(ex),
       roman: ex.roman.join(" │ "),
       cadence: ex.cadence,
       seed: ex.seed,

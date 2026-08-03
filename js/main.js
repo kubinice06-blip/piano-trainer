@@ -355,10 +355,10 @@ function applyIntervalPreset(direction = "up", degree = 2){
   state.training.intervalDirection = dir;
   state.training.intervalDegree = steps;
   $("lv").value = String(steps);
-  $("ts").value = "4/4";
+  $("ts").value = "3/4";
   $("hands").value = "both";
   $("dens").value = "pulse";
-  $("bars").value = "2";
+  $("bars").value = "1";
   $("flow").value = "manual";
   $("focus").value = "none";
   $("shownames").checked = false;
@@ -399,7 +399,7 @@ function renderCoach(){
   const direction = state.training.intervalDirection;
   const degree = state.training.intervalDegree;
   $("coachtitle").textContent = "垂直音程";
-  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${direction === "up" ? "上行" : "下行"}${intervalDegreeLabel(degree)}音階` +
+  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${direction === "up" ? "上行" : "下行"}${intervalDegreeLabel(degree)}・兩手同向八度` +
     (accuracy == null ? "" : `・命中率 ${accuracy}%（${stats.attempts} 拍）`);
   const stat = $("coachstat");
   stat.className = "interval-answer" + (state.training.intervalReveal ? " is-revealed" : "");

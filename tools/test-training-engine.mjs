@@ -42,17 +42,19 @@ assert.ok(swappedPlan.events.some((event) => event.part === "right"));
 assert.ok(swappedPlan.events.some((event) => event.part === "left"));
 
 for (const [direction, degree] of [["up", 1], ["up", 2], ["up", 3], ["down", 1], ["down", 2], ["down", 3]]){
-  const intervalScale = generateExercise({...cfg, keyPool:"C", density:"pulse", bars:2, seed:123459,
+  const intervalScale = generateExercise({...cfg, keyPool:"C", ts:"3/4", density:"pulse", bars:1, seed:123459,
     intervalDrill:{direction, degree}});
   const top = intervalScale.measures.flatMap((measure) => measure.top).map((item) => item.note);
   const bottom = intervalScale.measures.flatMap((measure) => measure.bottom).map((item) => item.note);
-  assert.equal(top.length, 8, "interval drill has one written note per beat");
-  assert.ok(top.slice(1).every((note, index) => dIdx(note) - dIdx(top[index]) === (direction === "up" ? 1 : -1)),
-    `${direction} interval drill is a continuous scale`);
-  assert.ok(bottom.slice(1).every((note, index) => dIdx(note) - dIdx(bottom[index]) === (direction === "up" ? 1 : -1)),
+  assert.equal(top.length, 3, "interval drill has one written note per beat");
+  assert.ok(top.slice(1).every((note, index) => dIdx(note) - dIdx(top[index]) === (direction === "up" ? degree : -degree)),
+    `${direction} interval drill keeps the selected motion interval`);
+  assert.ok(bottom.slice(1).every((note, index) => dIdx(note) - dIdx(bottom[index]) === (direction === "up" ? degree : -degree)),
     `${direction} lower hand stays parallel`);
-  assert.ok(top.every((note, index) => dIdx(note) - dIdx(bottom[index]) === degree),
-    `${degree + 1}th drill keeps an exact diatonic vertical interval`);
+  assert.ok(top.every((note, index) => dIdx(note) - dIdx(bottom[index]) === 7),
+    "hands remain one octave apart");
+  assert.ok(Math.max(...top.map(dIdx)) - Math.min(...top.map(dIdx)) <= 6,
+    "interval drill stays inside the central staff range");
 }
 
 for (let seed = 1; seed <= 120; seed++){

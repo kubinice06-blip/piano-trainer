@@ -103,9 +103,9 @@ function lastNoteOf(measures){
   return null;
 }
 
-/* 垂直音程不是一般旋律加上伴奏：練習目標是兩手同時走同一條音階，
-   所以兩個聲部都必須由同一個「全音階座標」直接生成。這可避免和聲伴奏
-   為了落在和弦音而打斷方向，造成看起來像是平行、實際卻亂跳的題目。 */
+/* 垂直音程不是一般旋律加上伴奏：兩手固定相隔八度、完全同向，
+   而「二／三／四度」指的是每一手相鄰兩音的移動距離。這可避免和聲
+   為了落在和弦音而打斷方向，造成看起來像平行、實際卻亂跳的題目。 */
 function scaleNote(key, degree, tonicOctave){
   const raw = key.letter + degree;
   const letter = ((raw % 7) + 7) % 7;
@@ -116,14 +116,16 @@ function scaleNote(key, degree, tonicOctave){
 function intervalScaleMeasures(key, bars, beats, drill){
   const total = Math.max(1, bars * beats);
   const direction = drill?.direction === "down" ? -1 : 1;
-  const stepsBelow = Math.max(1, Math.min(3, Number(drill?.degree) || 2));
-  // 上行由主音出發；下行先從高八度主音出發，兩種都是完整、連續的音階。
-  const start = direction > 0 ? 0 : 7;
+  const moveSteps = Math.max(1, Math.min(3, Number(drill?.degree) || 2));
+  // 依跳進大小調整起點：三個音都留在各自五線譜的中央，不跑到加線區。
+  const centreByStep = {1:31, 2:30, 3:28}; // 以全音階座標表示的 F4 / E4 / C4
+  const base = centreByStep[moveSteps] - (4 * 7 + key.letter);
+  const start = base + (direction < 0 ? moveSteps * (total - 1) : 0);
   const measures = Array.from({length:bars}, () => ({top:[], bottom:[]}));
   for (let i = 0; i < total; i++){
-    const degree = start + direction * i;
+    const degree = start + direction * moveSteps * i;
     const top = scaleNote(key, degree, 4);
-    const bottom = scaleNote(key, degree - stepsBelow, 4);
+    const bottom = scaleNote(key, degree, 3);
     const bar = Math.floor(i / beats);
     measures[bar].top.push({rest:false, note:top, dur:"q", clef:"treble", bar});
     measures[bar].bottom.push({rest:false, note:bottom, dur:"q", clef:"bass", bar});
@@ -185,7 +187,7 @@ export function generateExercise(cfg){
     out.cfg.intervalDrill = {direction, degree};
     out.measures = intervalScaleMeasures(key, barCount, beats, {direction, degree});
     out.lhPattern = "parallel";
-    out.lhLabel = "左手平行" + (degree + 1) + "度・" + (direction === "up" ? "上行音階" : "下行音階");
+    out.lhLabel = "兩手平行" + (degree + 1) + "度・" + (direction === "up" ? "上行" : "下行");
     out.tailNote = out.measures.at(-1)?.top.at(-1)?.note || null;
     return out;
   }

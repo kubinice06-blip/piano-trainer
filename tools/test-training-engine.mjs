@@ -41,21 +41,31 @@ const swappedPlan = exercisePlaybackPlan(swappedHands);
 assert.ok(swappedPlan.events.some((event) => event.part === "right"));
 assert.ok(swappedPlan.events.some((event) => event.part === "left"));
 
-for (const [direction, degree] of [["up", 1], ["up", 2], ["up", 3], ["down", 1], ["down", 2], ["down", 3]]){
-  const intervalScale = generateExercise({...cfg, keyPool:"C", ts:"3/4", density:"pulse", bars:1, seed:123459,
-    intervalDrill:{direction, degree}});
-  const top = intervalScale.measures.flatMap((measure) => measure.top).map((item) => item.note);
-  const bottom = intervalScale.measures.flatMap((measure) => measure.bottom).map((item) => item.note);
-  assert.equal(top.length, 3, "interval drill has one written note per beat");
-  assert.ok(top.slice(1).every((note, index) => dIdx(note) - dIdx(top[index]) === (direction === "up" ? degree : -degree)),
-    `${direction} interval drill keeps the selected motion interval`);
-  assert.ok(bottom.slice(1).every((note, index) => dIdx(note) - dIdx(bottom[index]) === (direction === "up" ? degree : -degree)),
-    `${direction} lower hand stays parallel`);
-  assert.ok(top.every((note, index) => dIdx(note) - dIdx(bottom[index]) === 7),
-    "hands remain one octave apart");
-  assert.ok(Math.max(...top.map(dIdx)) - Math.min(...top.map(dIdx)) <= 6,
-    "interval drill stays inside the central staff range");
+const seenIntervalSteps = [new Set(), new Set(), new Set()];
+for (let level = 1; level <= 3; level++){
+  for (let seed = 1; seed <= 24; seed++){
+    const intervalScale = generateExercise({...cfg, keyPool:"C", ts:"4/4", density:"pulse", bars:4, seed,
+      intervalDrill:{level}});
+    const top = intervalScale.measures.flatMap((measure) => measure.top).map((item) => item.note);
+    const bottom = intervalScale.measures.flatMap((measure) => measure.bottom).map((item) => item.note);
+    const motions = top.slice(1).map((note, index) => dIdx(note) - dIdx(top[index]));
+    const lowerMotions = bottom.slice(1).map((note, index) => dIdx(note) - dIdx(bottom[index]));
+    assert.equal(top.length, 16, "interval drill keeps the requested four-bar length");
+    assert.deepEqual(lowerMotions, motions, "both hands use the same random motion");
+    assert.ok(motions.every((motion) => Math.abs(motion) >= 1 && Math.abs(motion) <= level),
+      `level ${level} limits the largest interval`);
+    assert.ok(motions.some((motion) => motion > 0) && motions.some((motion) => motion < 0),
+      "each drill contains unpredictable ascending and descending motion");
+    assert.ok(top.every((note, index) => dIdx(note) - dIdx(bottom[index]) === 7),
+      "hands remain one octave apart");
+    assert.ok(Math.min(...top.map(dIdx)) >= 29 && Math.max(...top.map(dIdx)) <= 35,
+      "interval drill stays inside the central staff range");
+    motions.forEach((motion) => seenIntervalSteps[level - 1].add(Math.abs(motion)));
+  }
 }
+assert.deepEqual([...seenIntervalSteps[0]].sort(), [1], "easy drills only use seconds");
+assert.deepEqual([...seenIntervalSteps[1]].sort(), [1, 2], "standard drills add thirds");
+assert.deepEqual([...seenIntervalSteps[2]].sort(), [1, 2, 3], "advanced drills add fourths");
 
 for (let seed = 1; seed <= 120; seed++){
   const beginner = generateExercise({...cfg, level:1,

@@ -60,7 +60,7 @@ const state = {
   },
   lesson: null,
   weekly: null,
-  training: {mode:"free", manualBeat:0, intervalReveal:false, intervalDirection:"up", intervalDegree:2},
+  training: {mode:"free", manualBeat:0, intervalReveal:false, intervalLevel:1},
 };
 
 state.midi = new MidiInput((note, at, type) => type === "off"
@@ -346,19 +346,15 @@ function moveIntervalBeat(delta){
   if (!Metro.on) updateCursor(intervalCursorPosition());
 }
 
-function intervalDegreeLabel(degree){ return (Number(degree) + 1) + "度"; }
-
-function applyIntervalPreset(direction = "up", degree = 2){
+function applyIntervalPreset(level = 1){
   if (Metro.on) toggleMetro();
-  const steps = Math.max(1, Math.min(3, Number(degree) || 2));
-  const dir = direction === "down" ? "down" : "up";
-  state.training.intervalDirection = dir;
-  state.training.intervalDegree = steps;
-  $("lv").value = String(steps);
-  $("ts").value = "3/4";
+  const drillLevel = Math.max(1, Math.min(3, Number(level) || 1));
+  state.training.intervalLevel = drillLevel;
+  $("lv").value = String(drillLevel);
+  $("ts").value = "4/4";
   $("hands").value = "both";
   $("dens").value = "pulse";
-  $("bars").value = "1";
+  $("bars").value = "4";
   $("flow").value = "manual";
   $("focus").value = "none";
   $("shownames").checked = false;
@@ -396,10 +392,10 @@ function renderCoach(){
   const item = currentIntervalItem();
   const stats = Library.drillStats("vertical-interval");
   const accuracy = stats.accuracy == null ? null : Math.round(stats.accuracy * 100);
-  const direction = state.training.intervalDirection;
-  const degree = state.training.intervalDegree;
+  const drillLevel = state.training.intervalLevel;
+  const difficultyNames = ["簡單・二度為主・長方向段", "標準・加入三度・中等轉向", "進階・加入四度・頻繁轉向"];
   $("coachtitle").textContent = "垂直音程";
-  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${direction === "up" ? "上行" : "下行"}${intervalDegreeLabel(degree)}・兩手同向八度` +
+  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${difficultyNames[drillLevel - 1]}・方向隨機` +
     (accuracy == null ? "" : `・命中率 ${accuracy}%（${stats.attempts} 拍）`);
   const stat = $("coachstat");
   stat.className = "interval-answer" + (state.training.intervalReveal ? " is-revealed" : "");
@@ -414,10 +410,9 @@ function renderCoach(){
     coachButton("揭曉音程", () => { state.training.intervalReveal = true; renderCoach(); }, {primary:true});
     coachButton("跳過 →", () => moveIntervalBeat(1));
   }
-  [1, 2, 3].forEach((steps) => coachButton("上行" + intervalDegreeLabel(steps),
-    () => applyIntervalPreset("up", steps), {pressed:direction === "up" && degree === steps}));
-  [1, 2, 3].forEach((steps) => coachButton("下行" + intervalDegreeLabel(steps),
-    () => applyIntervalPreset("down", steps), {pressed:direction === "down" && degree === steps}));
+  ["簡單・二度", "標準・到三度", "進階・到四度"].forEach((label, index) =>
+    coachButton(label, () => applyIntervalPreset(index + 1), {pressed:drillLevel === index + 1}));
+  coachButton("換一題", () => generate(), {primary:true});
 }
 
 function setTrainingMode(mode){
@@ -425,7 +420,7 @@ function setTrainingMode(mode){
   state.training.manualBeat = 0;
   state.training.intervalReveal = false;
   $("trainmode").value = state.training.mode;
-  if (state.training.mode === "interval") applyIntervalPreset("up", 2);
+  if (state.training.mode === "interval") applyIntervalPreset(1);
   else { redraw(); renderCoach(); }
 }
 
@@ -1914,10 +1909,7 @@ function readCfg(){
     density: $("dens").value,
     focus: $("focus").value,
     inversion: $("inv").value,
-    intervalDrill: trainingMode() === "interval" ? {
-      direction:state.training.intervalDirection,
-      degree:state.training.intervalDegree
-    } : null,
+    intervalDrill: trainingMode() === "interval" ? {level:state.training.intervalLevel} : null,
     bars: Math.max(1, parseInt($("bars").value, 10) || 1),
     step: state.step
   };

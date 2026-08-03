@@ -113,22 +113,45 @@ function scaleNote(key, degree, tonicOctave){
   return key.noteAt(letter, octave);
 }
 
-function intervalScaleMeasures(key, bars, beats, drill){
+function intervalScaleMeasures(rng, key, bars, beats, drill){
   const total = Math.max(1, bars * beats);
-  const direction = drill?.direction === "down" ? -1 : 1;
-  const moveSteps = Math.max(1, Math.min(3, Number(drill?.degree) || 2));
-  // 依跳進大小調整起點：三個音都留在各自五線譜的中央，不跑到加線區。
-  const centreByStep = {1:31, 2:30, 3:28}; // 以全音階座標表示的 F4 / E4 / C4
-  const base = centreByStep[moveSteps] - (4 * 7 + key.letter);
-  const start = base + (direction < 0 ? moveSteps * (total - 1) : 0);
+  const level = Math.max(1, Math.min(3, Number(drill?.level) || 1));
+  const settings = [
+    {steps:[1], weights:[1], segment:[5, 7]},
+    {steps:[1, 2], weights:[4, 2], segment:[3, 5]},
+    {steps:[1, 2, 3], weights:[4, 3, 2], segment:[1, 3]}
+  ][level - 1];
+  const low = 29, high = 35; // 右手 D4–C5；左手同名音低八度
+  let position = rng.range(31, 33);
+  let direction = rng.chance(0.5) ? 1 : -1;
+  let segmentLeft = rng.range(settings.segment[0], settings.segment[1]);
   const measures = Array.from({length:bars}, () => ({top:[], bottom:[]}));
   for (let i = 0; i < total; i++){
-    const degree = start + direction * moveSteps * i;
+    const degree = position - (4 * 7 + key.letter);
     const top = scaleNote(key, degree, 4);
     const bottom = scaleNote(key, degree, 3);
     const bar = Math.floor(i / beats);
     measures[bar].top.push({rest:false, note:top, dur:"q", clef:"treble", bar});
     measures[bar].bottom.push({rest:false, note:bottom, dur:"q", clef:"bass", bar});
+    if (i === total - 1) continue;
+
+    segmentLeft--;
+    if (segmentLeft <= 0){
+      direction *= -1;
+      segmentLeft = rng.range(settings.segment[0], settings.segment[1]);
+    }
+    let step = rng.weighted(settings.steps, settings.weights);
+    let next = position + direction * step;
+    if (next < low || next > high){
+      direction *= -1;
+      segmentLeft = rng.range(settings.segment[0], settings.segment[1]);
+      next = position + direction * step;
+    }
+    while ((next < low || next > high) && step > 1){
+      step--;
+      next = position + direction * step;
+    }
+    position = Math.max(low, Math.min(high, next));
   }
   return measures;
 }
@@ -182,12 +205,11 @@ export function generateExercise(cfg){
   };
 
   if (cfg.intervalDrill){
-    const degree = Math.max(1, Math.min(3, Number(cfg.intervalDrill.degree) || 2));
-    const direction = cfg.intervalDrill.direction === "down" ? "down" : "up";
-    out.cfg.intervalDrill = {direction, degree};
-    out.measures = intervalScaleMeasures(key, barCount, beats, {direction, degree});
+    const drillLevel = Math.max(1, Math.min(3, Number(cfg.intervalDrill.level) || 1));
+    out.cfg.intervalDrill = {level:drillLevel};
+    out.measures = intervalScaleMeasures(rng.fork("interval"), key, barCount, beats, {level:drillLevel});
     out.lhPattern = "parallel";
-    out.lhLabel = "兩手平行" + (degree + 1) + "度・" + (direction === "up" ? "上行" : "下行");
+    out.lhLabel = ["兩手平行・二度為主", "兩手平行・二／三度", "兩手平行・二／三／四度"][drillLevel - 1];
     out.tailNote = out.measures.at(-1)?.top.at(-1)?.note || null;
     return out;
   }

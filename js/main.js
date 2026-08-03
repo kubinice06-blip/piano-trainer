@@ -60,7 +60,7 @@ const state = {
   },
   lesson: null,
   weekly: null,
-  training: {mode:"free", manualBeat:0, intervalReveal:false},
+  training: {mode:"free", manualBeat:0, intervalReveal:false, intervalDirection:"up", intervalDegree:2},
 };
 
 state.midi = new MidiInput((note, at, type) => type === "off"
@@ -346,19 +346,24 @@ function moveIntervalBeat(delta){
   if (!Metro.on) updateCursor(intervalCursorPosition());
 }
 
-function applyIntervalPreset(kind = "parallel"){
+function intervalDegreeLabel(degree){ return (Number(degree) + 1) + "度"; }
+
+function applyIntervalPreset(direction = "up", degree = 2){
   if (Metro.on) toggleMetro();
-  const pattern = kind === "contrary" ? "contrary" : "parallel";
-  $("lv").value = pattern === "parallel" ? "2" : "3";
+  const steps = Math.max(1, Math.min(3, Number(degree) || 2));
+  const dir = direction === "down" ? "down" : "up";
+  state.training.intervalDirection = dir;
+  state.training.intervalDegree = steps;
+  $("lv").value = String(steps);
   $("ts").value = "4/4";
   $("hands").value = "both";
   $("dens").value = "pulse";
-  $("bars").value = "4";
+  $("bars").value = "2";
   $("flow").value = "manual";
-  $("focus").value = pattern === "contrary" ? "leap" : "none";
+  $("focus").value = "none";
   $("shownames").checked = false;
   refreshLhPatterns();
-  $("lhpat").value = pattern;
+  $("lhpat").value = "parallel";
   syncFlow();
   state.training.manualBeat = 0;
   state.training.intervalReveal = false;
@@ -391,9 +396,10 @@ function renderCoach(){
   const item = currentIntervalItem();
   const stats = Library.drillStats("vertical-interval");
   const accuracy = stats.accuracy == null ? null : Math.round(stats.accuracy * 100);
-  const pattern = $("lhpat").value;
+  const direction = state.training.intervalDirection;
+  const degree = state.training.intervalDegree;
   $("coachtitle").textContent = "垂直音程";
-  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${pattern === "contrary" ? "反向題" : "同向三／六度題"}` +
+  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${direction === "up" ? "上行" : "下行"}${intervalDegreeLabel(degree)}音階` +
     (accuracy == null ? "" : `・命中率 ${accuracy}%（${stats.attempts} 拍）`);
   const stat = $("coachstat");
   stat.className = "interval-answer" + (state.training.intervalReveal ? " is-revealed" : "");
@@ -408,8 +414,10 @@ function renderCoach(){
     coachButton("揭曉音程", () => { state.training.intervalReveal = true; renderCoach(); }, {primary:true});
     coachButton("跳過 →", () => moveIntervalBeat(1));
   }
-  coachButton("同向題", () => applyIntervalPreset("parallel"), {pressed:pattern === "parallel"});
-  coachButton("反向題", () => applyIntervalPreset("contrary"), {pressed:pattern === "contrary"});
+  [1, 2, 3].forEach((steps) => coachButton("上行" + intervalDegreeLabel(steps),
+    () => applyIntervalPreset("up", steps), {pressed:direction === "up" && degree === steps}));
+  [1, 2, 3].forEach((steps) => coachButton("下行" + intervalDegreeLabel(steps),
+    () => applyIntervalPreset("down", steps), {pressed:direction === "down" && degree === steps}));
 }
 
 function setTrainingMode(mode){
@@ -417,7 +425,7 @@ function setTrainingMode(mode){
   state.training.manualBeat = 0;
   state.training.intervalReveal = false;
   $("trainmode").value = state.training.mode;
-  if (state.training.mode === "interval") applyIntervalPreset("parallel");
+  if (state.training.mode === "interval") applyIntervalPreset("up", 2);
   else { redraw(); renderCoach(); }
 }
 
@@ -1906,6 +1914,10 @@ function readCfg(){
     density: $("dens").value,
     focus: $("focus").value,
     inversion: $("inv").value,
+    intervalDrill: trainingMode() === "interval" ? {
+      direction:state.training.intervalDirection,
+      degree:state.training.intervalDegree
+    } : null,
     bars: parseInt($("bars").value, 10),
     step: state.step
   };

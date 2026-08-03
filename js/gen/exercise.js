@@ -103,6 +103,34 @@ function lastNoteOf(measures){
   return null;
 }
 
+/* 垂直音程不是一般旋律加上伴奏：練習目標是兩手同時走同一條音階，
+   所以兩個聲部都必須由同一個「全音階座標」直接生成。這可避免和聲伴奏
+   為了落在和弦音而打斷方向，造成看起來像是平行、實際卻亂跳的題目。 */
+function scaleNote(key, degree, tonicOctave){
+  const raw = key.letter + degree;
+  const letter = ((raw % 7) + 7) % 7;
+  const octave = tonicOctave + Math.floor(raw / 7);
+  return key.noteAt(letter, octave);
+}
+
+function intervalScaleMeasures(key, bars, beats, drill){
+  const total = Math.max(1, bars * beats);
+  const direction = drill?.direction === "down" ? -1 : 1;
+  const stepsBelow = Math.max(1, Math.min(3, Number(drill?.degree) || 2));
+  // 上行由主音出發；下行先從高八度主音出發，兩種都是完整、連續的音階。
+  const start = direction > 0 ? 0 : 7;
+  const measures = Array.from({length:bars}, () => ({top:[], bottom:[]}));
+  for (let i = 0; i < total; i++){
+    const degree = start + direction * i;
+    const top = scaleNote(key, degree, 4);
+    const bottom = scaleNote(key, degree - stepsBelow, 4);
+    const bar = Math.floor(i / beats);
+    measures[bar].top.push({rest:false, note:top, dur:"q", clef:"treble", bar});
+    measures[bar].bottom.push({rest:false, note:bottom, dur:"q", clef:"bass", bar});
+  }
+  return measures;
+}
+
 /**
  * @param {object} cfg {level, keyPool|key, ts, hands, lhPattern, bars, density, step, startIndex, seed}
  */
@@ -150,6 +178,17 @@ export function generateExercise(cfg){
     lhLabel: null,
     createdAt: Date.now()
   };
+
+  if (cfg.intervalDrill){
+    const degree = Math.max(1, Math.min(3, Number(cfg.intervalDrill.degree) || 2));
+    const direction = cfg.intervalDrill.direction === "down" ? "down" : "up";
+    out.cfg.intervalDrill = {direction, degree};
+    out.measures = intervalScaleMeasures(key, barCount, beats, {direction, degree});
+    out.lhPattern = "parallel";
+    out.lhLabel = "左手平行" + (degree + 1) + "度・" + (direction === "up" ? "上行音階" : "下行音階");
+    out.tailNote = out.measures.at(-1)?.top.at(-1)?.note || null;
+    return out;
+  }
 
   /* 旋律走在哪一手。旋律永遠在那隻手自己的音域裡寫成 ——
      所以左手拿旋律時，它落在左手本來就該待的位置，而不是右手音域硬搬下來。 */

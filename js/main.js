@@ -1918,7 +1918,7 @@ function readCfg(){
       direction:state.training.intervalDirection,
       degree:state.training.intervalDegree
     } : null,
-    bars: parseInt($("bars").value, 10),
+    bars: Math.max(1, parseInt($("bars").value, 10) || 1),
     step: state.step
   };
   return state.exerciseOverride ? Object.assign(base, state.exerciseOverride) : base;

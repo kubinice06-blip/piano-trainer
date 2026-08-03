@@ -20,6 +20,7 @@ import { MidiInput } from "./input/midi.js";
 import { OnsetInput } from "./input/onset.js";
 import { PerformanceMatcher } from "./input/performance.js";
 import { buildTapEvents, pianoRange, pianoNoteName, TapSightMatcher } from "./drills/tap-piano.js";
+import { analyzeVerticalIntervals } from "./interval-coach.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -58,6 +59,7 @@ const state = {
   },
   lesson: null,
   weekly: null,
+  training: {mode:"free", manualBeat:0, intervalReveal:false},
 };
 
 state.midi = new MidiInput((note, at, type) => type === "off"
@@ -131,7 +133,11 @@ function refreshLhPatterns(){
   auto.value = ""; auto.textContent = "隨機（依難度）";
   sel.appendChild(auto);
 
-  availablePatterns(level, ts).forEach(id => {
+  const ids = availablePatterns(level, ts);
+  if (state.training.mode === "interval"){
+    ["parallel", "contrary"].forEach(id => { if (!ids.includes(id)) ids.push(id); });
+  }
+  ids.forEach(id => {
     const o = document.createElement("option");
     o.value = id;
     o.textContent = LH_PATTERNS[id].label;
@@ -292,6 +298,115 @@ function setBpm(v){
 
 function isLoop(){ return state.mode === "read" && $("flow").value === "loop"; }
 
+/* ---------- 垂直音程教練 ----------
+   先讀兩手的移動關係，再找實際按鍵；這能避免右手讀完才回頭找左手。 */
+
+function trainingMode(){ return state.training.mode; }
+
+function coachButton(label, fn, opts = {}){
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "coach-btn" + (opts.primary ? " primary" : "") + (opts.danger ? " danger" : "");
+  button.textContent = label;
+  if (opts.pressed !== undefined) button.setAttribute("aria-pressed", opts.pressed ? "true" : "false");
+  button.addEventListener("click", fn);
+  $("coachactions").appendChild(button);
+}
+
+function intervalBeatCount(){
+  const ex = state.stream?.current();
+  return ex ? ex.cfg.bars * ex.beats : 0;
+}
+
+function intervalCursorPosition(){
+  const ex = state.stream?.current();
+  return ex ? state.stream.segStartBar * ex.beats + state.training.manualBeat + 0.001 : 0;
+}
+
+function moveIntervalBeat(delta){
+  const total = intervalBeatCount();
+  if (!total) return;
+  state.training.manualBeat = Math.max(0, Math.min(total - 1, state.training.manualBeat + delta));
+  state.training.intervalReveal = false;
+  renderCoach();
+  if (!Metro.on) updateCursor(intervalCursorPosition());
+}
+
+function applyIntervalPreset(kind = "parallel"){
+  if (Metro.on) toggleMetro();
+  const pattern = kind === "contrary" ? "contrary" : "parallel";
+  $("lv").value = pattern === "parallel" ? "2" : "3";
+  $("ts").value = "4/4";
+  $("hands").value = "both";
+  $("dens").value = "pulse";
+  $("bars").value = "4";
+  $("flow").value = "manual";
+  $("focus").value = pattern === "contrary" ? "leap" : "none";
+  $("shownames").checked = false;
+  refreshLhPatterns();
+  $("lhpat").value = pattern;
+  syncFlow();
+  state.training.manualBeat = 0;
+  state.training.intervalReveal = false;
+  generate({fresh:true});
+}
+
+function currentIntervalItem(){
+  const ex = state.stream?.current();
+  if (!ex) return null;
+  return analyzeVerticalIntervals(state.plan, ex.beats, ex.cfg.bars)[state.training.manualBeat] || null;
+}
+
+function scoreInterval(correct){
+  const item = currentIntervalItem();
+  if (!item) return;
+  Library.recordDrill("vertical-interval", {correct, details:{relation:item.relation}});
+  state.training.intervalReveal = false;
+  if (correct) moveIntervalBeat(1);
+  else renderCoach();
+}
+
+function renderCoach(){
+  const bar = $("coachbar");
+  if (!bar) return;
+  const active = state.mode === "read" && trainingMode() === "interval" && state.reviewIdx === -1;
+  bar.hidden = !active;
+  if (!active) return;
+
+  const total = intervalBeatCount();
+  const item = currentIntervalItem();
+  const stats = Library.drillStats("vertical-interval");
+  const accuracy = stats.accuracy == null ? null : Math.round(stats.accuracy * 100);
+  const pattern = $("lhpat").value;
+  $("coachtitle").textContent = "垂直音程";
+  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${pattern === "contrary" ? "反向題" : "同向三／六度題"}` +
+    (accuracy == null ? "" : `・命中率 ${accuracy}%（${stats.attempts} 拍）`);
+  const stat = $("coachstat");
+  stat.className = "interval-answer" + (state.training.intervalReveal ? " is-revealed" : "");
+  stat.textContent = state.training.intervalReveal && item
+    ? item.answer : "先說：右手往哪裡、幾度？左手呢？兩手同向、反向、斜向，還是保持？";
+  $("coachactions").innerHTML = "";
+  coachButton("← 上一拍", () => moveIntervalBeat(-1));
+  if (state.training.intervalReveal){
+    coachButton("答對・下一拍", () => scoreInterval(true), {primary:true});
+    coachButton("答錯・再看", () => scoreInterval(false), {danger:true});
+  } else {
+    coachButton("揭曉音程", () => { state.training.intervalReveal = true; renderCoach(); }, {primary:true});
+    coachButton("跳過 →", () => moveIntervalBeat(1));
+  }
+  coachButton("同向題", () => applyIntervalPreset("parallel"), {pressed:pattern === "parallel"});
+  coachButton("反向題", () => applyIntervalPreset("contrary"), {pressed:pattern === "contrary"});
+}
+
+function setTrainingMode(mode){
+  state.training.mode = mode === "interval" ? "interval" : "free";
+  state.training.manualBeat = 0;
+  state.training.intervalReveal = false;
+  $("trainmode").value = state.training.mode;
+  if (state.training.mode === "interval") applyIntervalPreset("parallel");
+  else { redraw(); renderCoach(); }
+}
+
 /* 一列譜可以用多高。頁面本身不捲，所以這是硬上限 ——
    連續流要同時擺兩段，每一段就只有一半的高度。
    放大超過 100% 時使用者是刻意要看大的，這時不設限，改由譜面區自己捲。 */
@@ -383,6 +498,8 @@ function renderRead(){
   renderReview();
   setupEyeMask();
   renderPracticePiano();
+  renderCoach();
+  if (!Metro.on && trainingMode() === "interval") updateCursor(intervalCursorPosition());
 }
 
 /* 段落結束：下一列升上來（它已經畫好了），舊的那一列拿去畫新的下一段。
@@ -390,6 +507,8 @@ function renderRead(){
 function advanceSegment(barsDone){
   const st = state.stream;
   st.advance(barsDone);
+  state.training.manualBeat = 0;
+  state.training.intervalReveal = false;
   if ($("flow").value === "flow"){
     state.nowRow = 1 - state.nowRow;
     state.rows[state.nowRow].querySelector(".rowtag").textContent = "現在";
@@ -403,6 +522,7 @@ function advanceSegment(barsDone){
     renderRead();
   }
   renderPracticePiano();
+  renderCoach();
   logCurrent();
 }
 
@@ -1787,6 +1907,8 @@ function generate(opts){
   state.revealed = $("revealed").checked;
   state.reviewIdx = -1;
   state.loopCount = 0;
+  state.training.manualBeat = 0;
+  state.training.intervalReveal = false;
   $("stage").classList.remove("reviewing");
 
   if (state.mode === "read"){
@@ -2180,6 +2302,7 @@ function bind(){
   $("fabgen").addEventListener("click", () => generate());
 
   $("swaphands").addEventListener("click", swapHands);
+  $("trainmode").addEventListener("change", function(){ setTrainingMode(this.value); });
   $("ratingbar").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-rating]");
     if (button) ratePending(button.dataset.rating, false);
@@ -2391,6 +2514,7 @@ function registerServiceWorker(){
 async function boot(){
   state.rows = [$("rowA"), $("rowB")];
   state.stream = new Stream(readCfg);
+  state.training.mode = $("trainmode").value || "free";
   await Library.load();
   Library.requestPersistence();
   fillLevels();

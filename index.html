@@ -151,6 +151,18 @@
     </fieldset>
 
     <fieldset>
+      <legend>讀譜教練</legend>
+      <div class="field">
+        <label for="trainmode">針對弱點的工具</label>
+        <select id="trainmode">
+          <option value="free" selected>自由視奏</option>
+          <option value="interval">垂直音程｜兩手方向與距離</option>
+        </select>
+      </div>
+      <div class="coach-mini" id="coachmini">保留目前設定，正常產生視譜題。</div>
+    </fieldset>
+
+    <fieldset>
       <legend>譜上要標什麼</legend>
       <label class="check"><input type="checkbox" id="showchords"> 和弦代號（C、G7…）</label>
       <label class="check"><input type="checkbox" id="showharm"> 和聲級數（I、V7…）</label>
@@ -319,15 +331,25 @@
         </div>
         <div class="sub" id="sheetSub">—</div>
       </div>
+      <section class="coachbar" id="coachbar" aria-live="polite" hidden>
+        <div class="coach-copy">
+          <b id="coachtitle"></b>
+          <span id="coachcue"></span>
+          <small id="coachstat"></small>
+        </div>
+        <div class="coach-actions" id="coachactions"></div>
+      </section>
       <div class="stage" id="stage">
         <div class="row" id="rowA">
           <div class="rowtag"></div>
           <div class="score"></div>
+          <div class="lookahead" hidden></div>
           <div class="cursor" hidden></div>
         </div>
         <div class="row" id="rowB">
           <div class="rowtag"></div>
           <div class="score"></div>
+          <div class="lookahead" hidden></div>
           <div class="cursor" hidden></div>
         </div>
       </div>

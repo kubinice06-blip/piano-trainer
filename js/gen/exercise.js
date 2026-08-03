@@ -122,7 +122,7 @@ function intervalScaleMeasures(rng, key, bars, beats, drill){
     {steps:[1, 2, 3], weights:[4, 3, 2], segment:[1, 3]}
   ][level - 1];
   const low = 29, high = 35; // 右手 D4–C5；左手同名音低八度
-  let position = rng.range(31, 33);
+  let position = rng.range(low, high);
   let direction = rng.chance(0.5) ? 1 : -1;
   let segmentLeft = rng.range(settings.segment[0], settings.segment[1]);
   const measures = Array.from({length:bars}, () => ({top:[], bottom:[]}));

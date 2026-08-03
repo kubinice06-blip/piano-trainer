@@ -9,6 +9,24 @@
 
 import { generateExercise } from "./gen/exercise.js";
 import { randomSeed } from "./core/rng.js";
+import { dIdx } from "./core/pitch.js";
+
+function intervalNotes(ex){
+  if (!ex?.cfg?.intervalDrill) return [];
+  return ex.measures.flatMap(measure => (measure.top || []))
+    .filter(item => !item.rest && item.note).map(item => dIdx(item.note));
+}
+
+function intervalDifference(a, b){
+  const left = intervalNotes(a), right = intervalNotes(b);
+  if (!left.length || left.length !== right.length) return {notes:left.length + right.length, motions:left.length + right.length};
+  let notes = 0, motions = 0;
+  for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) notes++;
+  for (let i = 1; i < left.length; i++){
+    if (left[i] - left[i - 1] !== right[i] - right[i - 1]) motions++;
+  }
+  return {notes, motions};
+}
 
 export class Stream {
   /**
@@ -39,7 +57,21 @@ export class Stream {
     /* 連著好幾段同樣的和聲進行，聽起來就是一直在重複 —— 每一段各自隨機是不夠的。
        做法是「換一顆 seed 重生」而不是在產生器裡重抽：
        usedCfg 裡就仍然只有一顆 seed，回顧與列印才重現得出一模一樣的譜。 */
-    if (seed === undefined && !fixedSeed){
+    if (seed === undefined && !fixedSeed && cfg.intervalDrill && prev){
+      // 簡單級的音域與音程都受限，只換 seed 仍可能畫出幾乎相同的折返線。
+      // 最多比較 32 題，選和上一題差異最大的；達到明顯差異便提早停止。
+      let best = ex, bestScore = -1;
+      for (let t = 0; t < 32; t++){
+        cfg.seed = randomSeed();
+        const candidate = generateExercise(cfg);
+        const diff = intervalDifference(candidate, prev);
+        const score = diff.notes * 2 + diff.motions;
+        if (score > bestScore){ best = candidate; bestScore = score; }
+        if (diff.notes >= 8 && diff.motions >= 6) break;
+      }
+      ex = best;
+      cfg.seed = ex.seed;
+    } else if (seed === undefined && !fixedSeed){
       const recent = this.recentProgressions();
       for (let t = 0; t < 6 && recent.indexOf(ex.harmony.tokens.join(" ")) >= 0; t++){
         cfg.seed = randomSeed();

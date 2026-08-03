@@ -11,6 +11,7 @@ import { N, dIdx, noteName } from "../js/core/pitch.js";
 import { Key } from "../js/core/key.js";
 import { realize, generateChordDrill, CHORD_RHYTHMS, chordRhythmPattern } from "../js/gen/chordprog.js";
 import { DUR } from "../js/gen/rhythm.js";
+import { Stream } from "../js/stream.js";
 
 assert.equal(AXES.length, 6);
 const highRhythm = stepVector(normaliseVector(null, 2), "rhythm", "up");
@@ -66,6 +67,21 @@ for (let level = 1; level <= 3; level++){
 assert.deepEqual([...seenIntervalSteps[0]].sort(), [1], "easy drills only use seconds");
 assert.deepEqual([...seenIntervalSteps[1]].sort(), [1, 2], "standard drills add thirds");
 assert.deepEqual([...seenIntervalSteps[2]].sort(), [1, 2, 3], "advanced drills add fourths");
+
+const streamCfg = {...cfg, level:1, keyPool:"C", ts:"4/4", bars:4, density:"pulse",
+  lhPattern:"parallel", intervalDrill:{level:1}};
+delete streamCfg.seed;
+const intervalStream = new Stream(() => ({...streamCfg}));
+let previousInterval = intervalStream.reset();
+for (let round = 0; round < 12; round++){
+  const currentInterval = intervalStream.regenerate();
+  const previousNotes = previousInterval.measures.flatMap((measure) => measure.top).map((item) => dIdx(item.note));
+  const currentNotes = currentInterval.measures.flatMap((measure) => measure.top).map((item) => dIdx(item.note));
+  const changed = currentNotes.filter((note, index) => note !== previousNotes[index]).length;
+  assert.notDeepEqual(currentNotes, previousNotes, "換一題 never repeats the previous interval contour");
+  assert.ok(changed >= 6, "換一題 produces a visibly different contour");
+  previousInterval = currentInterval;
+}
 
 for (let seed = 1; seed <= 120; seed++){
   const beginner = generateExercise({...cfg, level:1,

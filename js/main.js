@@ -393,9 +393,9 @@ function renderCoach(){
   const stats = Library.drillStats("vertical-interval");
   const accuracy = stats.accuracy == null ? null : Math.round(stats.accuracy * 100);
   const drillLevel = state.training.intervalLevel;
-  const difficultyNames = ["簡單・二度為主・長方向段", "標準・加入三度・中等轉向", "進階・加入四度・頻繁轉向"];
+  const difficultyNames = ["簡單・級進為主・長方向段", "標準・加入三度・中等轉向", "進階・加入四度・頻繁轉向"];
   $("coachtitle").textContent = "垂直音程";
-  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${difficultyNames[drillLevel - 1]}・方向隨機` +
+  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${difficultyNames[drillLevel - 1]}・和弦音骨架＋經過音` +
     (accuracy == null ? "" : `・命中率 ${accuracy}%（${stats.attempts} 拍）`);
   const stat = $("coachstat");
   stat.className = "interval-answer" + (state.training.intervalReveal ? " is-revealed" : "");
@@ -410,7 +410,7 @@ function renderCoach(){
     coachButton("揭曉音程", () => { state.training.intervalReveal = true; renderCoach(); }, {primary:true});
     coachButton("跳過 →", () => moveIntervalBeat(1));
   }
-  ["簡單・二度", "標準・到三度", "進階・到四度"].forEach((label, index) =>
+  ["簡單・級進", "標準・到三度", "進階・到四度"].forEach((label, index) =>
     coachButton(label, () => applyIntervalPreset(index + 1), {pressed:drillLevel === index + 1}));
   coachButton("換一題", () => generate(), {primary:true});
 }

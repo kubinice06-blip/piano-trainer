@@ -12,6 +12,7 @@ import { Key } from "../js/core/key.js";
 import { realize, generateChordDrill, CHORD_RHYTHMS, chordRhythmPattern } from "../js/gen/chordprog.js";
 import { DUR } from "../js/gen/rhythm.js";
 import { Stream } from "../js/stream.js";
+import { chordAt } from "../js/gen/harmony.js";
 
 assert.equal(AXES.length, 6);
 const highRhythm = stepVector(normaliseVector(null, 2), "rhythm", "up");
@@ -25,7 +26,7 @@ const cfg = {
 };
 const original = generateExercise(cfg);
 original.usedCfg = {...cfg, seed:original.seed, generatorVersion:GENERATOR_VERSION};
-assert.equal(original.generatorVersion, 3);
+assert.equal(original.generatorVersion, 4);
 assert.equal(original.measures.length, 4);
 const answerPlan = exercisePlaybackPlan(original);
 assert.ok(answerPlan.events.some((event) => event.part === "right"), "answer audio includes right hand");
@@ -50,18 +51,34 @@ for (let level = 1; level <= 3; level++){
     const top = intervalScale.measures.flatMap((measure) => measure.top).map((item) => item.note);
     const bottom = intervalScale.measures.flatMap((measure) => measure.bottom).map((item) => item.note);
     const motions = top.slice(1).map((note, index) => dIdx(note) - dIdx(top[index]));
-    const lowerMotions = bottom.slice(1).map((note, index) => dIdx(note) - dIdx(bottom[index]));
     assert.equal(top.length, 16, "interval drill keeps the requested four-bar length");
-    assert.deepEqual(lowerMotions, motions, "both hands use the same random motion");
-    assert.ok(motions.every((motion) => Math.abs(motion) >= 1 && Math.abs(motion) <= level),
-      `level ${level} limits the largest interval`);
-    assert.ok(motions.some((motion) => motion > 0) && motions.some((motion) => motion < 0),
-      "each drill contains unpredictable ascending and descending motion");
-    assert.ok(top.every((note, index) => dIdx(note) - dIdx(bottom[index]) === 7),
-      "hands remain one octave apart");
-    assert.ok(Math.min(...top.map(dIdx)) >= 29 && Math.max(...top.map(dIdx)) <= 35,
-      "interval drill stays inside the central staff range");
-    motions.forEach((motion) => seenIntervalSteps[level - 1].add(Math.abs(motion)));
+    assert.ok(Math.min(...top.map(dIdx)) >= 30 && Math.max(...top.map(dIdx)) <= 36,
+      "right hand stays inside the treble staff without ledger lines");
+    assert.ok(Math.min(...bottom.map(dIdx)) >= 18 && Math.max(...bottom.map(dIdx)) <= 24,
+      "left hand stays inside the bass staff without ledger lines");
+    assert.ok(top.every((note, index) => note.l !== bottom[index].l || note.a !== bottom[index].a),
+      "the hands never duplicate the same pitch class at an octave");
+
+    intervalScale.measures.forEach((measure, bar) => {
+      measure.top.forEach((item, beat) => {
+        const lower = measure.bottom[beat];
+        if (item.harmonicRole !== "chord") return;
+        const chord = chordAt(intervalScale.harmony, bar, beat).chord;
+        const chordClasses = new Set(chord.notes.map((note) => `${note.l}:${note.a}`));
+        assert.ok(chordClasses.has(`${item.note.l}:${item.note.a}`),
+          "right-hand anchor belongs to the active chord");
+        assert.ok(chordClasses.has(`${lower.note.l}:${lower.note.a}`),
+          "left-hand anchor belongs to the active chord");
+      });
+    });
+
+    intervalScale.measures.flatMap((measure) => measure.top).forEach((item, index, items) => {
+      if (!index || item.harmonicRole !== "passing") return;
+      const motion = Math.abs(dIdx(item.note) - dIdx(items[index - 1].note));
+      assert.ok(motion >= 1 && motion <= level,
+        `level ${level} limits each written passing motion`);
+      seenIntervalSteps[level - 1].add(motion);
+    });
   }
 }
 assert.deepEqual([...seenIntervalSteps[0]].sort(), [1], "easy drills only use seconds");

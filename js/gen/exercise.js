@@ -4,14 +4,14 @@ import { Rng, randomSeed } from "../core/rng.js";
 import { N, parseVexKey, dIdx } from "../core/pitch.js";
 import { Key, MAJOR_KEYS, MINOR_KEYS, ALL_KEYS, keysWithin, cycleOfFourths } from "../core/key.js";
 import { tsInfo, NOTE_DENSITY, densityMode } from "./rhythm.js";
-import { buildHarmony, cadenceKind } from "./harmony.js";
+import { buildHarmony, cadenceKind, chordAt } from "./harmony.js";
 import { melodyLine, scalePool, degreeMap, FOCUS, focusMode } from "./melody.js";
 import { bassLine, availablePatterns, LH_PATTERNS, INVERSIONS, inversionMode } from "./bass.js";
 import { normaliseVector, generatorLevels } from "../adaptive.js";
 
 /* Stored with every new exercise/attempt. Increment this whenever a generator
    change can make the same seed + settings produce a different score. */
-export const GENERATOR_VERSION = 3;
+export const GENERATOR_VERSION = 4;
 
 /* 難度不再綁死調名清單，改成「調號數上限」——
    所以每個難度都自然涵蓋到該範圍內的全部調，含小調。 */
@@ -103,9 +103,9 @@ function lastNoteOf(measures){
   return null;
 }
 
-/* 垂直音程不是一般旋律加上伴奏：兩手固定相隔八度、完全同向，
-   而「二／三／四度」指的是每一手相鄰兩音的移動距離。這可避免和聲
-   為了落在和弦音而打斷方向，造成看起來像平行、實際卻亂跳的題目。 */
+/* 垂直音程以和聲骨架出題：強拍與換和弦點只選當下和弦音，弱拍才使用
+   順階經過音。兩手分別作最近音聲部進行，並避開同名音的八度複製。
+   音域刻意縮在高、低音譜表內，難度只改變移動距離與轉向頻率。 */
 function scaleNote(key, degree, tonicOctave){
   const raw = key.letter + degree;
   const letter = ((raw % 7) + 7) % 7;
@@ -113,45 +113,148 @@ function scaleNote(key, degree, tonicOctave){
   return key.noteAt(letter, octave);
 }
 
-function intervalScaleMeasures(rng, key, bars, beats, drill){
+const INTERVAL_STAFF = {
+  treble:{low:30, high:36, centre:33}, // E4–D5：不使用加線
+  bass:{low:18, high:24, centre:21}    // B2–A3：不使用加線
+};
+
+function pitchClassKey(note){ return note.l + ":" + note.a; }
+
+function noteAtDiatonicPosition(key, position){
+  return scaleNote(key, position - (4 * 7 + key.letter), 4);
+}
+
+function chordCandidates(chord, staff){
+  const out = [], seen = new Set();
+  for (const source of chord.notes){
+    for (let shift = -4; shift <= 4; shift++){
+      const note = N(source.l, source.a, source.o + shift);
+      const position = dIdx(note);
+      const id = position + ":" + note.a;
+      if (position < staff.low || position > staff.high || seen.has(id)) continue;
+      seen.add(id);
+      out.push({note, pc:pitchClassKey(note)});
+    }
+  }
+  return out;
+}
+
+function chooseAnchorPair(rng, chord, previous, directions, level){
+  const right = chordCandidates(chord, INTERVAL_STAFF.treble);
+  const left = chordCandidates(chord, INTERVAL_STAFF.bass);
+  const pairs = [];
+  for (const r of right){
+    for (const l of left){
+      if (r.pc === l.pc) continue;
+      const rd = previous ? dIdx(r.note) - dIdx(previous.top) : 0;
+      const ld = previous ? dIdx(l.note) - dIdx(previous.bottom) : 0;
+      let score = Math.abs(dIdx(r.note) - INTERVAL_STAFF.treble.centre) * 0.35 +
+                  Math.abs(dIdx(l.note) - INTERVAL_STAFF.bass.centre) * 0.35;
+      if (previous){
+        score += Math.abs(rd) + Math.abs(ld);
+        score += Math.max(0, Math.abs(rd) - level * 2) * 5;
+        score += Math.max(0, Math.abs(ld) - level * 2) * 5;
+        const directionPenalty = [12, 8, 4][level - 1];
+        const repeatPenalty = [5, 3.5, 2][level - 1];
+        if (rd && Math.sign(rd) !== directions.top) score += directionPenalty;
+        if (ld && Math.sign(ld) !== directions.bottom) score += directionPenalty;
+        if (!rd) score += repeatPenalty;
+        if (!ld) score += repeatPenalty;
+      }
+      pairs.push({top:r.note, bottom:l.note, score:score + rng.next() * 1.5});
+    }
+  }
+  pairs.sort((a, b) => a.score - b.score);
+  if (!pairs.length) throw new Error("interval coach cannot place two different chord members inside the staves");
+  return pairs[0];
+}
+
+function passingPosition(rng, key, from, to, staff, level, fallbackDirection){
+  const start = dIdx(from), target = to ? dIdx(to) : start + fallbackDirection * level;
+  let direction = Math.sign(target - start) || fallbackDirection;
+  const distance = Math.abs(target - start);
+  const maxStep = Math.max(1, Math.min(level, distance || level));
+  const step = level === 1 ? 1 : rng.range(1, maxStep);
+  let position = start + direction * step;
+  if (position < staff.low || position > staff.high){
+    direction *= -1;
+    position = start + direction * step;
+  }
+  position = Math.max(staff.low, Math.min(staff.high, position));
+  return noteAtDiatonicPosition(key, position);
+}
+
+function avoidOctaveCopy(rng, key, top, bottom, staff, from, to, level, direction){
+  if (pitchClassKey(top) !== pitchClassKey(bottom)) return bottom;
+  const base = dIdx(bottom);
+  const options = [];
+  for (const offset of [-1, 1, -2, 2]){
+    const position = base + offset;
+    if (position < staff.low || position > staff.high) continue;
+    const note = noteAtDiatonicPosition(key, position);
+    if (pitchClassKey(note) === pitchClassKey(top)) continue;
+    const pathCost = Math.abs(position - dIdx(from)) + (to ? Math.abs(dIdx(to) - position) : 0);
+    const directionCost = Math.sign(position - dIdx(from)) === direction ? 0 : 1;
+    options.push({note, score:pathCost + directionCost + rng.next() * 0.2});
+  }
+  options.sort((a, b) => a.score - b.score);
+  return options[0]?.note || bottom;
+}
+
+function intervalHarmonyMeasures(rng, key, harmony, bars, beats, drill){
   const total = Math.max(1, bars * beats);
   const level = Math.max(1, Math.min(3, Number(drill?.level) || 1));
   const settings = [
-    {steps:[1], weights:[1], segment:[5, 7]},
-    {steps:[1, 2], weights:[4, 2], segment:[3, 5]},
-    {steps:[1, 2, 3], weights:[4, 3, 2], segment:[1, 3]}
+    {segment:[3, 4]},
+    {segment:[2, 3]},
+    {segment:[1, 2]}
   ][level - 1];
-  const low = 29, high = 35; // 右手 D4–C5；左手同名音低八度
-  let position = rng.range(low, high);
-  let direction = rng.chance(0.5) ? 1 : -1;
-  let segmentLeft = rng.range(settings.segment[0], settings.segment[1]);
+  const directions = {top:rng.chance(0.5) ? 1 : -1, bottom:rng.chance(0.5) ? 1 : -1};
+  let directionLeft = rng.range(settings.segment[0], settings.segment[1]);
+  const anchors = new Map();
+  let previous = null;
+
+  for (let i = 0; i < total; i++){
+    const bar = Math.floor(i / beats), beat = i % beats;
+    const slot = chordAt(harmony, bar, beat);
+    const isAnchor = i === 0 || beat % 2 === 0 || Math.abs(beat - slot.beat) < 1e-9;
+    if (!isAnchor) continue;
+    if (previous && --directionLeft <= 0){
+      if (level === 1 || rng.chance(level === 2 ? 0.7 : 0.9)) directions.top *= -1;
+      if (rng.chance(level === 1 ? 0.35 : 0.65)) directions.bottom *= -1;
+      directionLeft = rng.range(settings.segment[0], settings.segment[1]);
+    }
+    const pair = chooseAnchorPair(rng, slot.chord, previous, directions, level);
+    anchors.set(i, pair);
+    previous = pair;
+  }
+
   const measures = Array.from({length:bars}, () => ({top:[], bottom:[]}));
   for (let i = 0; i < total; i++){
-    const degree = position - (4 * 7 + key.letter);
-    const top = scaleNote(key, degree, 4);
-    const bottom = scaleNote(key, degree, 3);
-    const bar = Math.floor(i / beats);
-    measures[bar].top.push({rest:false, note:top, dur:"q", clef:"treble", bar});
-    measures[bar].bottom.push({rest:false, note:bottom, dur:"q", clef:"bass", bar});
-    if (i === total - 1) continue;
-
-    segmentLeft--;
-    if (segmentLeft <= 0){
-      direction *= -1;
-      segmentLeft = rng.range(settings.segment[0], settings.segment[1]);
+    const bar = Math.floor(i / beats), beat = i % beats;
+    const slot = chordAt(harmony, bar, beat);
+    let top, bottom, harmonicRole;
+    if (anchors.has(i)){
+      ({top, bottom} = anchors.get(i));
+      harmonicRole = "chord";
+    } else {
+      let previousIndex = i - 1;
+      while (previousIndex >= 0 && !anchors.has(previousIndex)) previousIndex--;
+      let nextIndex = i + 1;
+      while (nextIndex < total && !anchors.has(nextIndex)) nextIndex++;
+      const before = anchors.get(previousIndex);
+      const after = anchors.get(nextIndex);
+      const topDirection = after ? (Math.sign(dIdx(after.top) - dIdx(before.top)) || directions.top) : directions.top;
+      const bottomDirection = after ? (Math.sign(dIdx(after.bottom) - dIdx(before.bottom)) || directions.bottom) : directions.bottom;
+      top = passingPosition(rng, key, before.top, after?.top, INTERVAL_STAFF.treble, level, topDirection);
+      bottom = passingPosition(rng, key, before.bottom, after?.bottom, INTERVAL_STAFF.bass, level, bottomDirection);
+      bottom = avoidOctaveCopy(rng, key, top, bottom, INTERVAL_STAFF.bass,
+        before.bottom, after?.bottom, level, bottomDirection);
+      harmonicRole = "passing";
     }
-    let step = rng.weighted(settings.steps, settings.weights);
-    let next = position + direction * step;
-    if (next < low || next > high){
-      direction *= -1;
-      segmentLeft = rng.range(settings.segment[0], settings.segment[1]);
-      next = position + direction * step;
-    }
-    while ((next < low || next > high) && step > 1){
-      step--;
-      next = position + direction * step;
-    }
-    position = Math.max(low, Math.min(high, next));
+    const common = {rest:false, dur:"q", bar, beat, harmonicRole, chordToken:slot.token};
+    measures[bar].top.push({...common, note:top, clef:"treble"});
+    measures[bar].bottom.push({...common, note:bottom, clef:"bass"});
   }
   return measures;
 }
@@ -206,10 +309,11 @@ export function generateExercise(cfg){
 
   if (cfg.intervalDrill){
     const drillLevel = Math.max(1, Math.min(3, Number(cfg.intervalDrill.level) || 1));
-    out.cfg.intervalDrill = {level:drillLevel};
-    out.measures = intervalScaleMeasures(rng.fork("interval"), key, barCount, beats, {level:drillLevel});
-    out.lhPattern = "parallel";
-    out.lhLabel = ["兩手平行・二度為主", "兩手平行・二／三度", "兩手平行・二／三／四度"][drillLevel - 1];
+    const intervalRng = rng.fork("interval");
+    out.cfg.intervalDrill = {level:drillLevel, harmonyGuided:true};
+    out.measures = intervalHarmonyMeasures(intervalRng, key, H, barCount, beats, {level:drillLevel});
+    out.lhPattern = "voice-leading";
+    out.lhLabel = ["和弦骨架・級進為主", "和弦骨架・到三度", "和弦骨架・到四度"][drillLevel - 1];
     out.tailNote = out.measures.at(-1)?.top.at(-1)?.note || null;
     return out;
   }

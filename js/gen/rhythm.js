@@ -7,46 +7,10 @@ export const DUR = {
   "8d":0.75, "8":0.5, "16d":0.375, "16":0.25
 };
 
-/* 依難度分層，第 n 層以內的都會被抽到。
-   分層的軸是「讀起來有多難」：長音 → 八分 → 附點 → 十六分 → 切分。
-   同一層裡面盡量多給幾個型，不然同一個難度連出四題就會開始重複。 */
-const BANK_44 = [
-  [["w"], ["h","h"], ["h","q","q"], ["q","q","h"], ["q","q","q","q"], ["q","h","q"]],
-  [["q","q","8","8","q"], ["8","8","q","h"], ["q","8","8","q","q"], ["h","8","8","q"],
-   ["8","8","8","8","h"], ["q","q","q","8","8"], ["8","8","q","q","q"], ["q","8","8","8","8","q"],
-   ["8","8","8","8","q","q"], ["h","8","8","8","8"]],
-  [["hd","q"], ["q","hd"], ["h","8","8","q"], ["q","h","8","8"], ["8","8","hd"]],
-  [["qd","8","h"], ["h","qd","8"], ["qd","8","q","q"], ["q","q","qd","8"],
-   ["qd","8","qd","8"], ["qd","qd","q"], ["q","qd","8","q"], ["8d","16","q","h"]],
-  [["q","8","16","16","h"], ["q","16","16","8","q","q"], ["16","16","8","q","h"],
-   ["8","8","16","16","8","q","q"], ["q","q","8","16","16","q"], ["16","16","8","8","8","h"]],
-  [["8","q","8","h"], ["8","q","q","q","8"], ["8","8","q","8","8","q"],
-   ["8","q","q","8","q"], ["8","q","8","q","8","8"], ["q","8","q","8","q"]]
-];
-
-const BANK_34 = [
-  [["hd"], ["h","q"], ["q","h"], ["q","q","q"]],
-  [["q","8","8","q"], ["8","8","q","q"], ["q","q","8","8"], ["8","8","8","8","q"],
-   ["q","8","8","8","8"], ["8","8","8","8","8","8"]],
-  [["h","8","8"], ["8","8","h"]],
-  [["qd","8","q"], ["q","qd","8"], ["qd","qd"], ["qd","8","8","8"]],
-  [["q","16","16","8","q"], ["8","8","q","8","8"], ["16","16","8","q","q"], ["q","q","16","16","8"]],
-  [["8","q","q","8"], ["8","q","8","q"], ["q","8","q","8"]]
-];
-
-const BANK_24 = [
-  [["h"], ["q","q"]],
-  [["q","8","8"], ["8","8","q"], ["8","8","8","8"]],
-  [["qd","8"], ["8","qd"]],
-  [["8","q","8"], ["8d","16","q"]],
-  [["q","16","16","8"], ["16","16","8","q"], ["8","8","16","16","8"]],
-  [["8","16","16","8","8"], ["16","16","8","16","16","8"], ["16","16","8","8","8"]]
-];
-
 export const TIME_SIGNATURES = {
-  "4/4": {beats:4, beatValue:4, bank:BANK_44, beamGroups:[[1,4]]},
-  "3/4": {beats:3, beatValue:4, bank:BANK_34, beamGroups:[[1,4]]},
-  "2/4": {beats:2, beatValue:4, bank:BANK_24, beamGroups:[[1,4]]}
+  "4/4": {beats:4, beatValue:4, beamGroups:[[1,4]]},
+  "3/4": {beats:3, beatValue:4, beamGroups:[[1,4]]},
+  "2/4": {beats:2, beatValue:4, beamGroups:[[1,4]]}
 };
 
 export function tsInfo(ts){ return TIME_SIGNATURES[ts] || TIME_SIGNATURES["4/4"]; }
@@ -61,101 +25,158 @@ export function patternLength(pat){
   return t;
 }
 
-/* 載入時就把長度不對的型抓出來，寧可開發時炸掉也不要出題時默默畫錯 */
-(function validateBanks(){
+/* ---------- 節奏語彙階梯 ----------
+ *
+ * 舊版是「難度 n＝第 1..n 層混在一起抽」，於是同一段的第一小節可能是全音符、
+ * 第二小節就是六個八分音符 —— 讀起來忽長忽短。那不是難度，是雜訊。
+ *
+ * 這一版是階梯：每一階只有一組窄的音符語彙，一段之內的節奏因此是一致的。
+ * 順序照教材走：長音 → 加四分 → 純四分 → 加八分 → 純八分 → 附點切分 →
+ * 加十六分 → 純十六分。純的那幾階整段只有同一種音符，那正是重點 ——
+ * 練「認四分音符」的時候節奏不該再變，眼睛才騰得出全部注意力給音高。
+ *
+ * cells 是「剛好填滿一拍」的組合，longs 是跨拍的長音；一小節從第一拍往後鋪。
+ * 以拍為單位鋪，十六分就不會跨過拍點黏成一團，符桿分組自然是對的。
+ * signature 是這一階的招牌音符，含有它的型權重加重，不然附點會被平凡的型淹沒。
+ */
+const STEPS = [
+  {id:"long",            label:"長音（全・二分）",    split:0,
+   cells:[],                    longs:["w","hd","h"]},
+  {id:"longQuarter",     label:"長音＋四分混合",      split:0.30,
+   cells:[["q"]],               longs:["w","hd","h"]},
+  {id:"quarter",         label:"四分",                split:0,
+   cells:[["q"]],               longs:[]},
+  /* 混合階只在「一拍之內」變化，不放跨拍長音 —— 否則同一段裡
+     A 抽到二分音符、B 抽到連續八分，忽長忽短的老問題又回來了。
+     樂句仍然落在長音上：那是收尾小節的事，見 buildClosings。 */
+  {id:"quarterEighth",   label:"四分＋八分混合",      split:0.30,
+   cells:[["q"],["8","8"]],     longs:[]},
+  {id:"eighth",          label:"八分",                split:0,
+   cells:[["8","8"]],           longs:[]},
+  {id:"dotted",          label:"附點與切分",          split:0.35, syncopation:true,
+   cells:[["q"],["8","8"]],     longs:[],   signature:["qd","8d"]},
+  {id:"eighthSixteenth", label:"八分＋十六分混合",    split:0.30,
+   cells:[["q"],["8","8"],["8","16","16"],["16","16","8"],["16","16","16","16"]],
+   longs:[],  signature:["16"]},
+  {id:"16th",            label:"十六分",              split:0,
+   cells:[["16","16","16","16"],["8","16","16"],["16","16","8"]], longs:[]},
+  /* 垂直音程專用：每拍剛好一個音，兩手的縱向關係才對得整齊 */
+  {id:"pulse",           label:"每拍一音（垂直音程）", split:0,
+   cells:[["q"]],               longs:[]}
+];
+
+/* 附點與切分跨過拍點，排不進「一拍一格」的模型，只能列舉。 */
+const SYNCOPATION = {
+  "4/4":[["qd","8","h"], ["h","qd","8"], ["qd","8","q","q"], ["q","q","qd","8"],
+         ["qd","8","qd","8"], ["qd","qd","q"], ["q","qd","8","q"], ["8d","16","q","h"],
+         ["8","q","8","h"], ["8","q","q","q","8"], ["8","8","q","8","8","q"],
+         ["8","q","q","8","q"], ["q","8","q","8","q"]],
+  "3/4":[["qd","8","q"], ["q","qd","8"], ["qd","qd"], ["qd","8","8","8"],
+         ["8","q","q","8"], ["8","q","8","q"], ["q","8","q","8"]],
+  "2/4":[["qd","8"], ["8","qd"], ["8","q","8"], ["8d","16","q"]]
+};
+
+/* 從第一拍往後鋪，把這一階排得出來的小節全部列出來 */
+function buildBars(beats, cells, longs, out, acc, pos){
+  out = out || []; acc = acc || []; pos = pos || 0;
+  if (Math.abs(pos - beats) < 1e-9){ out.push(acc.slice()); return out; }
+  for (var i = 0; i < longs.length; i++){
+    var n = DUR[longs[i]];
+    if (pos + n > beats + 1e-9) continue;
+    acc.push(longs[i]);
+    buildBars(beats, cells, longs, out, acc, pos + n);
+    acc.pop();
+  }
+  for (var c = 0; c < cells.length; c++){
+    if (pos + 1 > beats + 1e-9) break;
+    for (var k = 0; k < cells[c].length; k++) acc.push(cells[c][k]);
+    buildBars(beats, cells, longs, out, acc, pos + 1);
+    acc.length -= cells[c].length;
+  }
+  return out;
+}
+
+/* 收尾小節：前面照這一階的語彙，最後一個音落在長音 —— 樂句要落地。
+   純八分、純十六分自己排不出長音，收尾是這幾階唯一的例外。 */
+function buildClosings(beats, cells, longs){
+  var out = [];
+  ["w","hd","h","q"].forEach(function(tail){
+    var n = DUR[tail];
+    if (n > beats + 1e-9) return;
+    if (Math.abs(n - beats) < 1e-9){ out.push([tail]); return; }
+    buildBars(beats - n, cells, longs).forEach(function(head){
+      out.push(head.concat(tail));
+    });
+  });
+  return out;
+}
+
+/* 每個拍號 × 每一階的譜面全部在載入時算好並驗長度 ——
+   寧可開發時炸掉，也不要出題時默默畫出小節長度不對的譜。 */
+const STEP_BANKS = {};
+(function buildAllBanks(){
   var bad = [];
   Object.keys(TIME_SIGNATURES).forEach(function(ts){
-    var info = TIME_SIGNATURES[ts];
-    info.bank.forEach(function(tier, ti){
-      tier.forEach(function(pat){
+    var beats = TIME_SIGNATURES[ts].beats;
+    STEP_BANKS[ts] = {};
+    STEPS.forEach(function(step){
+      var bank = buildBars(beats, step.cells, step.longs);
+      if (step.syncopation) bank = bank.concat(SYNCOPATION[ts] || []);
+      if (!bank.length) bank = [buildBars(beats, [["q"]], [])[0]];
+      var closing = buildClosings(beats, step.cells, step.longs);
+      var vocab = {};
+      bank.concat(closing).forEach(function(pat){
+        pat.forEach(function(d){ vocab[d] = 1; });
         var len = patternLength(pat);
-        if (Math.abs(len - info.beats) > 1e-9){
-          bad.push(ts + " 第" + (ti + 1) + "層 [" + pat.join(" ") + "] = " + len + " 拍，應為 " + info.beats);
+        if (Math.abs(len - beats) > 1e-9){
+          bad.push(ts + " " + step.id + " [" + pat.join(" ") + "] = " + len + " 拍，應為 " + beats);
         }
       });
+      STEP_BANKS[ts][step.id] = {bank:bank, closing:closing.length ? closing : bank, vocab:vocab};
     });
   });
   if (bad.length) throw new Error("節奏型時值錯誤：\n" + bad.join("\n"));
 })();
 
-/* ---------- 音符長短：跟難度分開的第二個軸 ----------
- *
- * 難度決定「用得到第幾層的節奏型」，這一軸決定「在拿得到的型裡面偏好長音還是短音」。
- * 兩件事本來就該分開：同一個難度，練慢的長音與練跑動的八分是兩種練習。
- * minTier 是「這個選擇至少要開到第幾層」—— 選了八分音符卻停在只有全音符與
- * 二分音符的第一層，設定會看起來完全沒作用。
- */
-export const NOTE_DENSITY = [
-  {id:"auto",    label:"隨難度",               bias: 0,   minTier:0},
-  {id:"long",    label:"長音為主（慢慢讀）",    bias:-2.2, minTier:0},
-  {id:"quarter", label:"四分音符為主",          bias:-1.0, minTier:0},
-  {id:"pulse",   label:"每拍一音（垂直音程）",  bias: 0,   minTier:0, exactPulse:true},
-  {id:"eighth",  label:"八分音符多一點",        bias: 1.6, minTier:2},
-  {id:"varied",  label:"長短交錯（附點・切分）", bias: 0.5, minTier:4, varied:true},
-  {id:"16th",    label:"十六分音符多一點",      bias: 2.6, minTier:5}
-];
+/* 舊存檔（弱點指紋、練習紀錄）裡還留著上一版的 id */
+const ALIASES = {auto:"quarter", varied:"dotted"};
+
+export const NOTE_DENSITY = STEPS.map(function(s){ return {id:s.id, label:s.label}; });
 
 export function densityMode(id){
-  for (var i = 0; i < NOTE_DENSITY.length; i++) if (NOTE_DENSITY[i].id === id) return NOTE_DENSITY[i];
-  return NOTE_DENSITY[0];
+  var wanted = ALIASES[id] || id;
+  for (var i = 0; i < STEPS.length; i++) if (STEPS[i].id === wanted) return STEPS[i];
+  return STEPS[0];
 }
 
-/* 實際開到第幾層 = 難度與音符長短兩者取大 */
-export function effectiveTier(level, densityId){
-  return Math.max(level, densityMode(densityId).minTier);
+function stepBank(ts, densityId){
+  return STEP_BANKS[TIME_SIGNATURES[ts] ? ts : "4/4"][densityMode(densityId).id];
 }
 
-export function rhythmBank(ts, level, densityId){
-  var info = tsInfo(ts);
-  if (densityMode(densityId).exactPulse){
-    return [Array.from({length:info.beats}, function(){ return "q"; })];
-  }
-  var n = Math.min(effectiveTier(level, densityId), info.bank.length);
-  var out = [];
-  for (var i = 0; i < n; i++) out = out.concat(info.bank[i]);
-  return out;
-}
+export function rhythmBank(ts, densityId){ return stepBank(ts, densityId).bank; }
+export function closingBank(ts, densityId){ return stepBank(ts, densityId).closing; }
 
-/* 收尾小節：最後一個音必須是長音，樂句才會落地 */
-export function closingBank(ts, level, densityId){
-  var all = rhythmBank(ts, level, densityId);
-  var b = all.filter(function(p){
-    var last = p[p.length - 1];
-    return last === "w" || last === "h" || last === "hd";
-  });
-  return b.length ? b : all;
-}
+/* 這一階容許哪些音符。動機變形只能拆出這裡面有的東西，
+   不然練純四分的段落會被變形偷渡進八分音符。 */
+export function rhythmVocabulary(ts, densityId){ return stepBank(ts, densityId).vocab; }
 
-/* 一個型裡面用到幾種不同的時值。長短交錯的型分數高。 */
-function spread(pat){
-  var seen = {}, n = 0;
-  for (var i = 0; i < pat.length; i++) if (!seen[pat[i]]){ seen[pat[i]] = 1; n++; }
-  return Math.min(1, (n - 1) / 2);
-}
-
-/* 權重 = 密度^bias。密度差一倍，權重就差 2^bias 倍 ——
-   所以 bias 為正時八分音符的型會比全音符的型常出現得多。 */
-export function patternWeights(bank, densityId){
-  var m = densityMode(densityId);
-  return bank.map(function(p){
-    var w = Math.pow(density(p), m.bias);
-    if (m.varied) w *= 1 + 1.8 * spread(p);
-    return Math.max(1e-6, w);
+function patternWeights(bank, densityId){
+  var sig = densityMode(densityId).signature;
+  return bank.map(function(pat){
+    if (!sig) return 1;
+    return pat.some(function(d){ return sig.indexOf(d) >= 0; }) ? 3 : 1;
   });
 }
 
 export function pickRhythm(rng, bank, densityId){
-  var m = densityMode(densityId);
-  if (!m.bias && !m.varied) return rng.pick(bank);
-  return rng.weighted(bank, patternWeights(bank, densityId));
+  if (bank.length < 2) return bank[0].slice();
+  var w = patternWeights(bank, densityId);
+  var uniform = w.every(function(x){ return x === w[0]; });
+  return uniform ? rng.pick(bank) : rng.weighted(bank, w);
 }
 
-/* 動機變形時「把長音拆碎」的機率。偏短音就拆得兇一點。 */
-export function splitChance(densityId){
-  var m = densityMode(densityId);
-  if (m.exactPulse) return 0;
-  return Math.max(0.05, Math.min(0.9, 0.45 + m.bias * 0.22));
-}
+/* 動機變形時「把長音拆碎」的機率。純語彙的階不拆，整段才會維持同一種音符。 */
+export function splitChance(densityId){ return densityMode(densityId).split || 0; }
 
 /* 節奏型 → 每個音的起始拍 */
 export function beatsOf(pat){
@@ -169,6 +190,3 @@ export function isStrong(beat, ts){
   if (ts === "2/4") return beat === 0;
   return beat === 0 || beat === 2;          // 4/4 的一、三拍
 }
-
-/* 節奏的「密度」，用來讓兩手不要同時都很忙 */
-export function density(pat){ return pat.length / patternLength(pat); }

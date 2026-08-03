@@ -14,6 +14,7 @@ import { DUR } from "./rhythm.js";
    所以和弦伴奏在所有難度都選得到。 */
 export const LH_PATTERNS = {
   sustain:   {label:"持續低音",       minLevel:1, needsMelody:false},
+  halfNote:  {label:"二分音符・兩手 2:1", minLevel:1, needsMelody:false},
   rootFifth: {label:"根音－五音",     minLevel:1, needsMelody:false},
   block:     {label:"塊狀和弦",       minLevel:1, needsMelody:false},
   waltz:     {label:"低音－和弦－和弦", minLevel:1, needsMelody:false, tsOnly:"3/4"},
@@ -176,6 +177,20 @@ function patternNotes(rng, name, ctx){
                                      : (sl.beats === 2 ? "h" : "q");
         emitFor(sl, d, ch => mem(ch, 0));
       });
+
+    } else if (name === "halfNote"){
+      /* 兩手 2:1：左手固定每 2 拍一個音，右手是四分音符時剛好慢一半。
+         這裡刻意不跟著和聲節奏走 —— 一小節換兩個和弦也照樣是兩個二分音符。
+         合手練習的重點是「左手的落點永遠可預測」，眼睛才有餘裕垂直讀譜；
+         落點一旦跟著和聲忽快忽慢，這個練習就失去意義了。
+         三拍子分不成兩半，整小節就是一個附點二分。 */
+      const span = (beats === 3) ? 3 : 2;
+      for (let b = 0; b < beats; b += span){
+        const d = (span === 3) ? "hd" : "h";
+        // 根音、五音交替，左手才不會整段咬著同一個音
+        const pickIdx = ((b / span) % 2 === 0) ? 0 : 2;
+        emitFor(chordAt(H, mi, b), d, ch => mem(ch, pickIdx));
+      }
 
     } else if (name === "rootFifth"){
       slots.forEach(sl => {

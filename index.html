@@ -74,15 +74,9 @@
           <select id="hands"></select>
         </div>
       </div>
-      <div class="row2">
-        <div class="field">
-          <label for="dens">音符長短</label>
-          <select id="dens"></select>
-        </div>
-        <div class="field">
-          <label for="focus">強化練習</label>
-          <select id="focus"></select>
-        </div>
+      <div class="field">
+        <label for="focus">強化練習</label>
+        <select id="focus"></select>
       </div>
       <label class="check"><input type="checkbox" id="showfingering" checked> 顯示指法與轉指位置</label>
       <label class="check">
@@ -92,6 +86,7 @@
       <details class="difficulty-details">
         <summary>六軸難度微調 <small id="axistarget">目前強化：—</small></summary>
         <div class="axis-grid" id="axiscontrols"></div>
+        <div class="line">「難度」是這六軸的總開關；音符長短、伴奏密度、遮罩距離都只在這裡調。</div>
       </details>
     </fieldset>
 
@@ -117,7 +112,7 @@
       <legend>兩手與伴奏</legend>
       <button class="btn btn-ghost btn-wide" id="swaphands">⇄ 左右手交換練同一段</button>
       <div class="field">
-        <label for="lhpat">伴奏寫法<small class="hint">沒拿旋律的那隻手</small></label>
+        <label for="lhpat">伴奏寫法<small class="hint">沒拿旋律的那隻手；選「隨機」時由六軸的織度決定</small></label>
         <select id="lhpat"></select>
       </div>
       <div class="field">
@@ -153,17 +148,19 @@
           <option value="4" selected>4 遍</option>
           <option value="8">8 遍</option>
         </select>
+        <label class="check"><input type="checkbox" id="lhladder"> 伴奏漸進：長音 4:1 → 二分 2:1 → 原設定</label>
       </div>
     </fieldset>
 
     <fieldset>
-      <legend>視線與眼手距離</legend>
+      <legend>移動遮罩<small class="hint">　遮多遠由六軸的「眼手距離」決定</small></legend>
       <div class="row2">
         <div class="field">
           <label for="maskmode">移動遮罩</label>
           <select id="maskmode">
             <option value="off">關閉</option>
             <option value="follow">隨拍遮住已讀區</option>
+            <option value="window">拍窗：只露兩拍（上下一起讀）</option>
             <option value="flash">掃描後全部遮住</option>
           </select>
         </div>
@@ -182,6 +179,14 @@
         <select id="trainmode">
           <option value="free" selected>自由視奏</option>
           <option value="interval">垂直音程｜和弦聲部進行</option>
+        </select>
+      </div>
+      <div class="field" id="intervallevelfield" hidden>
+        <label for="intervallevel">行進難度</label>
+        <select id="intervallevel">
+          <option value="1" selected>1 · 簡單（級進為主・長方向段）</option>
+          <option value="2">2 · 標準（加入三度・中等轉向）</option>
+          <option value="3">3 · 進階（加入四度・頻繁轉向）</option>
         </select>
       </div>
       <div class="coach-mini" id="coachmini">保留目前設定，正常產生視譜題。</div>
@@ -470,6 +475,6 @@
 <!-- 拼頁列印用；平常不顯示，只有列印練習單時才排進頁面 -->
 <div class="printsheet" id="sheetout" hidden></div>
 
-<script type="module" src="js/main.js?v=23"></script>
+<script type="module" src="js/main.js?v=29"></script>
 </body>
 </html>

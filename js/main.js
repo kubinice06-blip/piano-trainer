@@ -46,6 +46,7 @@ const state = {
   practiceStart: 0,    // 這一輪節拍器開始的時間，用來累計練習時數
   playAlongCycle: 0,   // 和弦模式跟播到第幾輪
   loopCount: 0,        // 重複同一段時已經彈完第幾遍
+  ladderStep: 0,       // 伴奏漸進階梯走到第幾階（0 = 長音）
   pendingRatingId: null,
   exerciseOverride: null,
   activeWeaknessId: null,
@@ -88,16 +89,6 @@ function fillHands(){
     sel.appendChild(o);
   });
   sel.value = "both";
-}
-
-function fillDensity(){
-  const sel = $("dens");
-  NOTE_DENSITY.forEach(d => {
-    const o = document.createElement("option");
-    o.value = d.id; o.textContent = d.label;
-    sel.appendChild(o);
-  });
-  sel.value = "auto";
 }
 
 function fillFocus(){
@@ -177,7 +168,8 @@ function fillKeySelect(){
     sel.appendChild(g);
   });
 
-  sel.value = "level";
+  // 預設固定 C 大調：初學視奏先把位置感建立在無升降的譜面上，要換調再自己選
+  sel.value = "C";
 }
 
 function fillProgressions(){
@@ -277,16 +269,35 @@ function setupEyeMask(){
   } else if (mode === "follow") {
     const lead = generatorLevels(currentVector()).maskLead ?? 0;
     $("maskstatus").textContent = `移動遮罩：手前 ${lead} 拍內會被遮住`;
+  } else if (mode === "window") {
+    const lead = generatorLevels(currentVector()).maskLead ?? 0;
+    $("maskstatus").textContent = lead
+      ? `拍窗：露出手前 ${lead} 拍起的兩拍，手上的音靠記憶`
+      : "拍窗：只露出當下這拍與下一拍";
+    maskWindow(0);
   } else {
     $("maskstatus").textContent = "眼手距離：關閉";
   }
 }
 
+/* 拍窗：兩行譜只露出 [start, start+2) 拍的直欄，前面與更遠的全遮。
+   眼睛沒辦法先橫掃右手整句再回頭找左手 —— 每一拍都得上下一起讀。
+   眼手距離軸把窗往前推：lead > 0 時連當下那拍也被遮住，手上的音靠短期記憶。 */
+function maskWindow(localBeat){
+  const lead = generatorLevels(currentVector()).maskLead ?? 0;
+  const start = localBeat + lead;
+  maskPlanEvents(state.plan, (event) =>
+    event.t + event.d <= start + 1e-6 || event.t >= start + 2 - 1e-6);
+}
+
 function updateEyeMask(position){
-  if (state.mode !== "read" || $("maskmode").value !== "follow" || !state.stream) return;
+  if (state.mode !== "read" || !state.stream) return;
+  const mode = $("maskmode").value;
+  if (mode !== "follow" && mode !== "window") return;
   const ex = state.stream.current();
   if (!ex) return;
   const localBeat = position - state.stream.segStartBar * ex.beats;
+  if (mode === "window"){ maskWindow(localBeat); return; }
   const lead = generatorLevels(currentVector()).maskLead ?? 0;
   maskPlanEvents(state.plan, (event) => event.t <= localBeat + lead + 1e-6);
 }
@@ -311,6 +322,36 @@ function setBpm(v){
 }
 
 function isLoop(){ return state.mode === "read" && $("flow").value === "loop"; }
+
+/* ---------- 伴奏漸進階梯 ----------
+   重複同一段時，左手由長音 → 塊狀 → 原設定逐遍加密。
+   同一顆 seed 重生（走 restyle），旋律與和聲完全不變 —— 變的只有伴奏密度。
+   教學上這是雙手合手的標準解法：先讓左手「落點極少」，眼睛有餘裕垂直讀，
+   合得順了才逐步把左手還原成真正的音型。 */
+const LH_LADDER = ["sustain", "halfNote", null];   // null = 回到使用者選的伴奏寫法
+
+function ladderActive(){
+  return state.mode === "read" && $("flow").value === "loop" && $("lhladder").checked &&
+         trainingMode() !== "interval" &&
+         ($("hands").value === "both" || $("hands").value === "swap");
+}
+
+function ladderPattern(){
+  const fixed = LH_LADDER[Math.min(state.ladderStep, LH_LADDER.length - 1)];
+  return fixed || ($("lhpat").value || null);
+}
+
+/* 開關階梯或改流程時，把目前這一段就地換回正確的伴奏密度 */
+function syncLadder(){
+  state.ladderStep = 0;
+  if (state.mode !== "read" || !state.stream || !state.stream.current()) return;
+  const want = ladderActive() ? ladderPattern() : ($("lhpat").value || null);
+  const used = state.stream.current().usedCfg;
+  if (used && used.lhPattern !== want){
+    state.stream.restyle({lhPattern: want});
+    renderRead();
+  }
+}
 
 /* ---------- 垂直音程教練 ----------
    先讀兩手的移動關係，再找實際按鍵；這能避免右手讀完才回頭找左手。 */
@@ -350,10 +391,10 @@ function applyIntervalPreset(level = 1){
   if (Metro.on) toggleMetro();
   const drillLevel = Math.max(1, Math.min(3, Number(level) || 1));
   state.training.intervalLevel = drillLevel;
+  $("intervallevel").value = String(drillLevel);
   $("lv").value = String(drillLevel);
   $("ts").value = "4/4";
   $("hands").value = "both";
-  $("dens").value = "pulse";
   $("bars").value = "4";
   $("flow").value = "manual";
   $("focus").value = "none";
@@ -388,31 +429,30 @@ function renderCoach(){
   bar.hidden = !active;
   if (!active) return;
 
+  /* 譜面上只留「當下這一拍要按的東西」；難度切換與換一題都在抽屜／頂欄，
+     教練列才不會疊成兩三行擋住譜。 */
   const total = intervalBeatCount();
   const item = currentIntervalItem();
   const stats = Library.drillStats("vertical-interval");
   const accuracy = stats.accuracy == null ? null : Math.round(stats.accuracy * 100);
-  const drillLevel = state.training.intervalLevel;
-  const difficultyNames = ["簡單・級進為主・長方向段", "標準・加入三度・中等轉向", "進階・加入四度・頻繁轉向"];
   $("coachtitle").textContent = "垂直音程";
-  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍・${difficultyNames[drillLevel - 1]}・和弦音骨架＋經過音` +
-    (accuracy == null ? "" : `・命中率 ${accuracy}%（${stats.attempts} 拍）`);
+  $("coachcue").textContent = `第 ${state.training.manualBeat + 1} / ${total} 拍` +
+    (accuracy == null ? "" : `・命中率 ${accuracy}%（${stats.attempts} 拍）`) +
+    (Metro.on ? "・跟拍中" : "");
   const stat = $("coachstat");
   stat.className = "interval-answer" + (state.training.intervalReveal ? " is-revealed" : "");
   stat.textContent = state.training.intervalReveal && item
-    ? item.answer : "先說：右手往哪裡、幾度？左手呢？兩手同向、反向、斜向，還是保持？";
+    ? item.answer
+    : "先說：兩手各往哪裡、幾度？什麼關係？";
   $("coachactions").innerHTML = "";
-  coachButton("← 上一拍", () => moveIntervalBeat(-1));
+  coachButton("←", () => moveIntervalBeat(-1));
   if (state.training.intervalReveal){
-    coachButton("答對・下一拍", () => scoreInterval(true), {primary:true});
-    coachButton("答錯・再看", () => scoreInterval(false), {danger:true});
+    coachButton("對・下一拍", () => scoreInterval(true), {primary:true});
+    coachButton("錯・再看", () => scoreInterval(false), {danger:true});
   } else {
-    coachButton("揭曉音程", () => { state.training.intervalReveal = true; renderCoach(); }, {primary:true});
-    coachButton("跳過 →", () => moveIntervalBeat(1));
+    coachButton("揭曉", () => { state.training.intervalReveal = true; renderCoach(); }, {primary:true});
+    coachButton("→", () => moveIntervalBeat(1));
   }
-  ["簡單・級進", "標準・到三度", "進階・到四度"].forEach((label, index) =>
-    coachButton(label, () => applyIntervalPreset(index + 1), {pressed:drillLevel === index + 1}));
-  coachButton("換一題", () => generate(), {primary:true});
 }
 
 function setTrainingMode(mode){
@@ -420,8 +460,13 @@ function setTrainingMode(mode){
   state.training.manualBeat = 0;
   state.training.intervalReveal = false;
   $("trainmode").value = state.training.mode;
-  if (state.training.mode === "interval") applyIntervalPreset(1);
-  else { redraw(); renderCoach(); }
+  $("intervallevelfield").hidden = state.training.mode !== "interval";
+  $("coachmini").textContent = state.training.mode === "interval"
+    ? "逐拍先說兩手怎麼移動、什麼關係，再揭曉核對。開節拍器＝跟拍自動揭曉（說在前、核對在後）。"
+    : "保留目前設定，正常產生視譜題。";
+  // 兩個方向都要重新出題：切回自由視奏若只重畫，留在螢幕上的還是音程練習的譜
+  if (state.training.mode === "interval") applyIntervalPreset(parseInt($("intervallevel").value, 10) || 1);
+  else { renderCoach(); generate({fresh:true}); }
 }
 
 /* 一列譜可以用多高。頁面本身不捲，所以這是硬上限 ——
@@ -444,7 +489,7 @@ function drawOpts(){
     showNames: $("shownames").checked,
     showHarmony: $("showharm").checked,
     showChords: $("showchords").checked,
-    showFingering: $("showfingering").checked,
+    showFingering: $("showfingering").checked && trainingMode() !== "interval",
     repeat: isLoop(),
     maxHeight: rowMaxHeight(),
     zoom: parseInt($("zoom").value, 10) / 100
@@ -522,8 +567,11 @@ function renderRead(){
   if (!Metro.on && trainingMode() === "interval") updateCursor(intervalCursorPosition());
 }
 
+/* 指法引導假設「旋律＋伴奏、固定手位」；垂直音程模式是兩聲部逐拍移動，
+   手位提示套不上去，整排都不顯示。 */
 function renderFingeringGuide(ex){
-  const visible = state.mode === "read" && !!ex && $("showfingering").checked;
+  const visible = state.mode === "read" && !!ex && $("showfingering").checked &&
+                  trainingMode() !== "interval";
   $("fingerguide").hidden = !visible;
   $("fingerguide").textContent = visible ? fingeringSummary(ex) : "";
 }
@@ -910,13 +958,21 @@ function currentVector(){
   return normaliseVector(value, parseInt($("lv").value, 10) || 1);
 }
 
+/* 六軸就是唯一的難度控制面板；面板上把「這一軸管抽屜裡哪件事」寫清楚，
+   使用者才不會以為抽屜別處還有第二顆一樣的旋鈕。 */
+const AXIS_UI_LABELS = {
+  rhythm:  "節奏（音符長短）",
+  texture: "織度（雙手與伴奏）",
+  eyeHand: "眼手距離（遮罩超前）",
+};
+
 function fillAxisControls(){
   const host = $("axiscontrols");
   host.innerHTML = "";
   for (const axis of AXES){
     const wrap = document.createElement("label");
     wrap.className = "axis-item";
-    wrap.textContent = AXIS_INFO[axis].label;
+    wrap.textContent = AXIS_UI_LABELS[axis] || AXIS_INFO[axis].label;
     const select = document.createElement("select");
     select.id = "axis-" + axis;
     AXIS_INFO[axis].levels.forEach((label, value) => {
@@ -948,13 +1004,13 @@ function applyVectorToUi(value, options = {}){
   }
   const mapped = generatorLevels(vector);
   $("lv").value = String(Math.max(mapped.rangeLevel, mapped.rhythmLevel, mapped.textureLevel));
-  if (Array.from($("dens").options).some((option) => option.value === mapped.density)) $("dens").value = mapped.density;
   setBpm(mapped.bpm);
 
   const textures = [
     {hands:"rh", pattern:null}, {hands:"both", pattern:"sustain"},
-    {hands:"both", pattern:"block"}, {hands:"both", pattern:"arpeggio"},
-    {hands:"both", pattern:"parallel"}, {hands:"both", pattern:"contrary"},
+    {hands:"both", pattern:"halfNote"}, {hands:"both", pattern:"block"},
+    {hands:"both", pattern:"arpeggio"}, {hands:"both", pattern:"parallel"},
+    {hands:"both", pattern:"contrary"},
   ];
   const texture = textures[vector.texture];
   $("hands").value = texture.hands;
@@ -962,10 +1018,9 @@ function applyVectorToUi(value, options = {}){
   if (texture.pattern && Array.from($("lhpat").options).some((option) => option.value === texture.pattern)) {
     $("lhpat").value = texture.pattern;
   }
-  const lead = EYE_HAND_BEATS[vector.eyeHand];
-  $("maskstatus").textContent = lead == null ? "眼手距離：關閉" : `眼手距離：${lead} 拍（遮罩迫使視線提前）`;
   if (vector.eyeHand > 0 && $("maskmode").value === "off") $("maskmode").value = "follow";
   if (vector.eyeHand === 0 && $("maskmode").value === "follow") $("maskmode").value = "off";
+  setupEyeMask();   // 狀態列文字統一由 setupEyeMask 寫，兩邊才不會各說各話
   if (options.persist) Library.setAdaptive({vector});
   syncAxisTarget();
   if (options.regenerate && state.stream){
@@ -1120,7 +1175,7 @@ function tapHand(){ return $("taphand")?.value === "lh" ? "lh" : "rh"; }
 
 function buildTapExercise(){
   const level = microLevel();
-  const density = ["long", "quarter", "eighth", "varied", "16th", "16th"][level - 1];
+  const density = ["long", "longQuarter", "quarter", "quarterEighth", "eighth", "dotted"][level - 1];
   const difficulty = presetVector(level);
   // The pitch challenge still grows, but the on-screen keyboard stays within
   // a comfortable two-octave hand area on an iPad.
@@ -1385,7 +1440,7 @@ function buildMicroItem(kind){
   }
 
   if (kind === "rhythm"){
-    const rhythmDensity = ["long", "quarter", "eighth", "varied", "16th", "16th"][level - 1];
+    const rhythmDensity = ["long", "longQuarter", "quarter", "quarterEighth", "eighth", "dotted"][level - 1];
     const source = make(rhythmDensity, "C");
     const ex = source;
     for (const measure of ex.measures){
@@ -1684,10 +1739,10 @@ function stopLesson(completed = false){
 
 const WEEKLY_SEGMENTS = [
   {seed:0x51a001,level:2,ts:"4/4",hands:"rh",density:"quarter",focus:"none",bars:4,difficulty:presetVector(2)},
-  {seed:0x51a002,level:3,ts:"3/4",hands:"both",lhPattern:"sustain",density:"eighth",focus:"none",bars:4,difficulty:presetVector(3)},
-  {seed:0x51a003,level:3,ts:"4/4",hands:"lh",density:"varied",focus:"leap",bars:4,difficulty:presetVector(3)},
-  {seed:0x51a004,level:4,ts:"4/4",hands:"both",lhPattern:"block",density:"varied",focus:"ledger",bars:4,difficulty:presetVector(4)},
-  {seed:0x51a005,level:4,ts:"3/4",hands:"swap",lhPattern:"arpeggio",density:"varied",focus:"none",bars:4,difficulty:presetVector(4)},
+  {seed:0x51a002,level:3,ts:"3/4",hands:"both",lhPattern:"sustain",density:"quarterEighth",focus:"none",bars:4,difficulty:presetVector(3)},
+  {seed:0x51a003,level:3,ts:"4/4",hands:"lh",density:"eighth",focus:"leap",bars:4,difficulty:presetVector(3)},
+  {seed:0x51a004,level:4,ts:"4/4",hands:"both",lhPattern:"block",density:"dotted",focus:"ledger",bars:4,difficulty:presetVector(4)},
+  {seed:0x51a005,level:4,ts:"3/4",hands:"swap",lhPattern:"arpeggio",density:"dotted",focus:"none",bars:4,difficulty:presetVector(4)},
 ];
 
 function isoWeekId(date = new Date()){
@@ -1880,7 +1935,9 @@ function stopCursor(){
   if (state.cursorRaf) cancelAnimationFrame(state.cursorRaf);
   state.cursorRaf = null;
   state.rows.forEach(r => { r.querySelector(".cursor").hidden = true; });
-  if ($("maskmode").value === "follow") clearEyeMasks();
+  const mask = $("maskmode").value;
+  if (mask === "follow") clearEyeMasks();
+  else if (mask === "window") setupEyeMask();   // 停下來時拍窗退回段落開頭
 }
 
 function renderAnswerBox(){
@@ -1905,8 +1962,10 @@ function readCfg(){
     keyPool: $("keysel").value,
     ts: $("ts").value,
     hands: $("hands").value,
-    lhPattern: $("lhpat").value || null,
-    density: $("dens").value,
+    lhPattern: ladderActive() ? ladderPattern() : ($("lhpat").value || null),
+    // 音符長短唯一的控制位是六軸的「節奏」軸；留 null 讓產生器直接吃軸值。
+    // 垂直音程模式固定每拍一音，只是讓譜面標題能寫出這件事。
+    density: trainingMode() === "interval" ? "pulse" : null,
     focus: $("focus").value,
     inversion: $("inv").value,
     intervalDrill: trainingMode() === "interval" ? {level:state.training.intervalLevel} : null,
@@ -1920,6 +1979,7 @@ function readCfg(){
 function syncFlow(){
   $("repsfield").hidden = ($("flow").value !== "loop");
   state.loopCount = 0;
+  state.ladderStep = 0;
 }
 
 /* 左右手交換練：同一段譜，換一隻手當主角。
@@ -1959,6 +2019,7 @@ function generate(opts){
   state.revealed = $("revealed").checked;
   state.reviewIdx = -1;
   state.loopCount = 0;
+  state.ladderStep = 0;
   state.training.manualBeat = 0;
   state.training.intervalReveal = false;
   $("stage").classList.remove("reviewing");
@@ -2151,7 +2212,9 @@ function buildBeatStrip(n){
 function liveLabel(){
   if (!isLoop()) return "進行中";
   const lim = repeatLimit();
-  return "第 " + (state.loopCount + 1) + (lim ? " / " + lim : "") + " 遍";
+  const stage = ladderActive()
+    ? ["・左手長音 4:1", "・左手二分 2:1", "・左手原設定"][Math.min(state.ladderStep, 2)] : "";
+  return "第 " + (state.loopCount + 1) + (lim ? " / " + lim : "") + " 遍" + stage;
 }
 
 function repeatLimit(){ return parseInt($("reps").value, 10) || 0; }   // 0 = 一直重複
@@ -2162,6 +2225,24 @@ Metro.onBeat = (i, counting) => {
   if (cells[i]) cells[i].classList.add("on");
   $("clipmeta").textContent = counting ? "預備" : liveLabel();
   updateCursor();          // rAF 被節流時，靠這裡把游標推下去
+
+  /* 垂直音程教練的跟拍模式：節拍器開著時，教練列跟著拍點走並自動揭曉。
+     練法是「說在前、核對在後」—— 上一拍就先出聲說兩手要往哪裡，
+     這一拍響起時看答案核對。分析工具因此有了時間壓力，才接得上實際視奏。 */
+  if (!counting && state.mode === "read" && trainingMode() === "interval" &&
+      state.reviewIdx === -1 && state.stream){
+    const ex = state.stream.current();
+    if (ex){
+      const total = ex.cfg.bars * ex.beats;
+      const local = Math.round(Metro.position()) - state.stream.segStartBar * ex.beats;
+      const beat = Math.max(0, Math.min(total - 1, local));
+      if (beat !== state.training.manualBeat || !state.training.intervalReveal){
+        state.training.manualBeat = beat;
+        state.training.intervalReveal = true;
+        renderCoach();
+      }
+    }
+  }
 };
 
 Metro.onBar = (barsDone) => {
@@ -2188,12 +2269,27 @@ Metro.onBar = (barsDone) => {
     const lim = repeatLimit();
     if (!lim || state.loopCount < lim){
       state.stream.segStartBar = barsDone;
+      /* 伴奏漸進：下一遍升一階（長音 → 塊狀 → 原設定），同 seed 就地重生。
+         右手與和聲一個音都不變，變的只有左手的密度。 */
+      if (ladderActive()){
+        const step = Math.min(state.loopCount, LH_LADDER.length - 1);
+        if (step !== state.ladderStep){
+          state.ladderStep = step;
+          state.stream.restyle({lhPattern: ladderPattern()});
+          renderRead();
+        }
+      }
       $("clipmeta").textContent = liveLabel();
       startPlayAlong();
       beginCurrentAttempt();
       return;
     }
     state.loopCount = 0;
+    // 段落換新之前先回到第一階，下一段又從左手長音開始爬
+    if (ladderActive() && state.ladderStep){
+      state.ladderStep = 0;
+      state.stream.restyle({lhPattern: ladderPattern()});
+    }
   }
 
   advanceSegment(barsDone);
@@ -2358,12 +2454,15 @@ function bind(){
 
   $("swaphands").addEventListener("click", swapHands);
   $("trainmode").addEventListener("change", function(){ setTrainingMode(this.value); });
+  $("intervallevel").addEventListener("change", function(){
+    if (trainingMode() === "interval") applyIntervalPreset(parseInt(this.value, 10) || 1);
+  });
   $("ratingbar").addEventListener("click", (event) => {
     const button = event.target.closest("button[data-rating]");
     if (button) ratePending(button.dataset.rating, false);
   });
   $("adaptive").addEventListener("change", function(){
-    Library.setAdaptive({enabled:this.checked, level:parseInt($("lv").value, 10), density:$("dens").value, vector:currentVector()});
+    Library.setAdaptive({enabled:this.checked, level:parseInt($("lv").value, 10), vector:currentVector()});
   });
 
   $("maskmode").addEventListener("change", setupEyeMask);
@@ -2377,17 +2476,18 @@ function bind(){
       refreshLhPatterns();
       generate({fresh:true});
     }));
-  ["keysel", "bars", "lhpat", "dens", "focus", "inv"].forEach(id =>
+  ["keysel", "bars", "lhpat", "focus", "inv"].forEach(id =>
     $(id).addEventListener("change", () => {
       if (Metro.on) toggleMetro();
       generate({fresh:true});
     }));
-  ["lv", "dens"].forEach(id => $(id).addEventListener("change", () => {
-    Library.setAdaptive({level:parseInt($("lv").value, 10), density:$("dens").value});
-  }));
+  $("lv").addEventListener("change", () => {
+    Library.setAdaptive({level:parseInt($("lv").value, 10)});
+  });
   // 換流程不必換題目 —— 只是重畫（反覆記號、預讀那一列）並歸零遍數
-  $("flow").addEventListener("change", () => { syncFlow(); redraw(); });
+  $("flow").addEventListener("change", () => { syncFlow(); syncLadder(); redraw(); });
   $("reps").addEventListener("change", () => { state.loopCount = 0; });
+  $("lhladder").addEventListener("change", () => { state.loopCount = 0; syncLadder(); });
   ["shownames", "showharm", "showchords", "showfingering"].forEach(id =>
     $(id).addEventListener("change", () => { redraw(); updateRevealButton(); }));
 
@@ -2578,7 +2678,6 @@ async function boot(){
   Library.requestPersistence();
   fillLevels();
   fillHands();
-  fillDensity();
   fillFocus();
   fillInversions();
   fillAxisControls();

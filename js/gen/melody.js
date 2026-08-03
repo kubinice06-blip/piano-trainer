@@ -13,7 +13,7 @@
 import { N, dIdx, absPitch, parseVexKey, isAugmentedSecond } from "../core/pitch.js";
 import { chordAt } from "./harmony.js";
 import { rhythmBank, closingBank, beatsOf, isStrong, DUR,
-         pickRhythm, splitChance, effectiveTier, patternLength } from "./rhythm.js";
+         pickRhythm, splitChance, rhythmVocabulary, patternLength } from "./rhythm.js";
 
 /* ---------- 強化練習：把旋律往某一種技巧上壓 ----------
  *
@@ -82,19 +82,19 @@ const PHRASE_FORMS = [
   ["A","A2","A","C"], ["A","B","A2","C"], ["A","A","A2","C"]
 ];
 
-/* 動機變形：把節奏切碎或合併，但保留輪廓長度。
-   p 是拆碎的機率、deep 決定要不要連八分音符也拆成十六分 ——
-   兩者都由「音符長短」那個設定決定，所以同一個動機在不同設定下會長出不同的變形。 */
-function varyRhythm(rng, pat, beats, p, deep){
+/* 動機變形：把節奏切碎，但保留輪廓長度。
+   只拆得出「這一階語彙裡本來就有」的音符 —— 練純四分的段落不能被變形
+   偷渡進八分音符，否則整段的一致性又破功了。純語彙的階 p 為 0，等於不變形。 */
+function varyRhythm(rng, pat, beats, p, vocab){
+  if (!p) return pat.slice();
   const out = [];
   for (const d of pat){
-    if (DUR[d] >= 1 && rng.chance(p)){
-      // 一個四分拆成兩個八分
-      if (d === "q"){ out.push("8", "8"); continue; }
-      if (d === "h"){ out.push("q", "q"); continue; }
-      if (d === "qd"){ out.push("q", "8"); continue; }
+    if (rng.chance(d === "8" ? p * 0.45 : p)){
+      if (d === "h"  && vocab.q)  { out.push("q", "q"); continue; }
+      if (d === "q"  && vocab["8"]) { out.push("8", "8"); continue; }
+      if (d === "qd" && vocab["8"]) { out.push("q", "8"); continue; }
+      if (d === "8"  && vocab["16"]){ out.push("16", "16"); continue; }
     }
-    if (deep && d === "8" && rng.chance(p * 0.45)){ out.push("16", "16"); continue; }
     out.push(d);
   }
   const len = out.reduce((a, b) => a + DUR[b], 0);
@@ -110,10 +110,10 @@ function planRhythm(rng, cfg, barCount, beats){
     if (valid) return preferred.slice(0, barCount).map((cell) => cell.slice());
   }
   const dens = cfg.density;
-  const bank = rhythmBank(cfg.ts, cfg.level, dens);
-  const closing = closingBank(cfg.ts, cfg.level, dens);
+  const bank = rhythmBank(cfg.ts, dens);
+  const closing = closingBank(cfg.ts, dens);
+  const vocab = rhythmVocabulary(cfg.ts, dens);
   const p = splitChance(dens);
-  const deep = effectiveTier(cfg.level, dens) >= 5;
   const form = barCount === 4 ? rng.pick(PHRASE_FORMS)
              : Array.from({length: barCount}, (_, i) =>
                  i === barCount - 1 ? "C" : (i % 4 === 0 ? "A" : (i % 4 === 2 ? "A2" : "B")));
@@ -122,7 +122,7 @@ function planRhythm(rng, cfg, barCount, beats){
   return form.map((tag, i) => {
     if (i === barCount - 1 || tag === "C") return pickRhythm(rng, closing, dens);
     if (tag === "A2"){
-      cells.A2 = cells.A2 || varyRhythm(rng, cells.A || pickRhythm(rng, bank, dens), beats, p, deep);
+      cells.A2 = cells.A2 || varyRhythm(rng, cells.A || pickRhythm(rng, bank, dens), beats, p, vocab);
       return cells.A2.slice();
     }
     cells[tag] = cells[tag] || pickRhythm(rng, bank, dens);
